@@ -1,13 +1,18 @@
 module Engine
-  ( Expr
-  , value
+  -- constructors
+  ( value
   , add
   , mul
+  , tanh
+  -- evaluation
   , eval
+  -- plotting
   , plotGraphPng
   )
 where
 
+import Prelude hiding (tanh)
+import qualified Prelude as P (tanh)
 import Graph.Dot
 import Control.Monad.Trans.State
 
@@ -22,6 +27,7 @@ data ExprAlg a
   = Value Label Double Double
   | Add a [ExprAlg a]
   | Mul a [ExprAlg a]
+  | Tanh a (ExprAlg a)
 
 -- Expressions before evaluation
 type Label = String
@@ -49,6 +55,9 @@ add label a b = Add label [a, b]
 mul :: Label -> Expr -> Expr -> Expr
 mul label a b = Mul label [a, b]
 
+tanh :: Label -> Expr -> Expr
+tanh = Tanh
+
 
 ----------------
 -- Evaluation --
@@ -58,11 +67,13 @@ eval :: Expr -> Double
 eval (Value _ val _) = val
 eval (Add _ children) = sum (fmap eval children)
 eval (Mul _ children) = product (fmap eval children)
+eval (Tanh _ child) = P.tanh (eval child)
 
 getValue :: EvalExpr -> Double
 getValue (Value _ val _) = val
 getValue (Add (EvalNode _ val) _) = val
 getValue (Mul (EvalNode _ val) _) = val
+getValue (Tanh (EvalNode _ val) _) = val
 
 evalExpr :: Expr -> EvalExpr
 evalExpr (Value label val grad) = Value label val grad
@@ -74,6 +85,10 @@ evalExpr (Mul label children) =
   let children' = fmap evalExpr children
       evalNode = EvalNode label (product (fmap getValue children'))
   in Mul evalNode children'
+evalExpr (Tanh label child) =
+  let child' = evalExpr child
+      evalNode = EvalNode label (P.tanh (getValue child'))
+  in Tanh evalNode child'
 
 oneVsRest :: [a] -> [(a, [a])]
 oneVsRest [] = []
@@ -98,6 +113,11 @@ backpropExpr' grad (Mul evalNode children) =
       grads = fmap computeGrad (oneVsRest children)
       children' = zipWith backpropExpr' grads children
    in Mul gradNode children'
+backpropExpr' grad (Tanh evalNode child) =
+  let EvalNode label val = evalNode
+      gradNode = GradNode label val grad
+      child' = backpropExpr' (grad * (1 - val * val)) child
+   in Tanh gradNode child'
 
 backpropExpr :: EvalExpr -> GradExpr
 backpropExpr = backpropExpr' 1.0
@@ -122,20 +142,33 @@ getNodeId = do
   pure (NodeId nid)
 
 toTree' :: GradExpr -> State Int Tree
+--
 toTree' (Value label val grad) = do
   nid <- getNodeId
   pure (Tree nid (DataNode label val grad) [])
-toTree' (Add (GradNode label val grad) children) = do
+--
+toTree' (Add gradNode children) = do
+  let GradNode label val grad = gradNode
   children' <- traverse toTree' children
   nid <- getNodeId
-  mid <- getNodeId
   let inner = Tree nid (OpNode "+") children'
-  pure (Tree mid (DataNode label val grad) [inner])
-toTree' (Mul (GradNode label val grad) es) = do
-  es' <- traverse toTree' es
-  nid <- getNodeId
   mid <- getNodeId
-  let inner = Tree nid (OpNode "*") es'
+  pure (Tree mid (DataNode label val grad) [inner])
+--
+toTree' (Mul gradNode children) = do
+  let GradNode label val grad = gradNode
+  children' <- traverse toTree' children
+  nid <- getNodeId
+  let inner = Tree nid (OpNode "*") children'
+  mid <- getNodeId
+  pure (Tree mid (DataNode label val grad) [inner])
+--
+toTree' (Tanh gradNode child) = do
+  let GradNode label val grad = gradNode
+  child' <- toTree' child
+  nid <- getNodeId
+  let inner = Tree nid (OpNode "tanh") [child']
+  mid <- getNodeId
   pure (Tree mid (DataNode label val grad) [inner])
 
 toTree :: GradExpr -> Tree
