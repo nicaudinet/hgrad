@@ -1,95 +1,144 @@
+{-# LANGUAGE RecordWildCards #-}
+
 module Engine
+  -- types
+  ( BPGraph
+  , GraphNode(..)
   -- constructors
-  ( value
+  , makeGraph
+  , value
   , add
   , mul
   , tanh
   -- evaluation
-  , eval
+  , forward
+  , backprop
   -- plotting
   , plotGraphPng
   )
 where
 
-import Prelude hiding (tanh)
 import qualified Prelude as P (tanh)
-import Graph.Dot
-import Control.Monad.Trans.State
+import Prelude hiding (tanh)
 
+import Control.Monad (forM, forM_)
+import Control.Monad.Trans.State
+import Data.Maybe (fromJust)
+import qualified Data.Map as M
+import qualified Graph as G
+import Graph.Dot
 
 -----------
 -- Types --
 -----------
 
--- Main expression type
--- Parametrized over the values of the intermediate nodes
-data ExprAlg a
-  = Value Label Double Double
-  | Add a [ExprAlg a]
-  | Mul a [ExprAlg a]
-  | Tanh a (ExprAlg a)
-
--- Expressions before evaluation
 type Label = String
-type Expr = ExprAlg Label
 
--- Expressions after evaluation
-data EvalNode = EvalNode Label Double
-type EvalExpr = ExprAlg EvalNode
+-- | Types of nodes
+data NodeType
+  = ValueNode
+  | AddNode
+  | MulNode
+  | TanhNode
+  deriving (Eq)
 
--- Expressions after backpropagation
-data GradNode = GradNode Label Double Double
-type GradExpr = ExprAlg GradNode
+-- | Data type for the contents of a graph node
+data GraphNode =
+  GraphNode
+    { nodeType :: NodeType
+    , nodeLabel :: Label
+    , nodeVal :: Double
+    , nodeGrad :: Double
+    }
+  deriving (Eq)
 
+-- | Back Propagation Graph
+type BPGraph = G.Graph GraphNode
+
+----------------------
+-- Graph Primitives --
+----------------------
+
+makeGraph :: State (G.Graph a) b -> G.Graph a
+makeGraph = flip execState G.empty
+
+addNode :: a -> State (G.Graph a) G.NodeId
+addNode node = do
+  graph <- get
+  let (nid, graph') = G.addNode node graph
+  put graph'
+  pure nid
+
+addEdge :: Eq a => G.NodeId -> G.NodeId -> State (G.Graph a) ()
+addEdge nid1 nid2 = modify (G.addEdge nid1 nid2)
 
 ------------------
 -- Constructors --
 ------------------
 
-value :: Label -> Double -> Expr
-value label num = Value label num 0.0
+value :: Label -> Double -> State BPGraph G.NodeId
+value label val = addNode (GraphNode ValueNode label val 0.0)
 
-add :: Label -> Expr -> Expr -> Expr
-add label a b = Add label [a, b]
+add :: Label -> G.NodeId -> G.NodeId -> State BPGraph G.NodeId 
+add label a b = do
+  nid <- addNode (GraphNode AddNode label 0.0 0.0)
+  addEdge a nid
+  addEdge b nid
+  pure nid
 
-mul :: Label -> Expr -> Expr -> Expr
-mul label a b = Mul label [a, b]
+mul :: Label -> G.NodeId -> G.NodeId -> State BPGraph G.NodeId
+mul label a b = do
+  nid <- addNode (GraphNode MulNode label 0.0 0.0)
+  addEdge a nid
+  addEdge b nid
+  pure nid
 
-tanh :: Label -> Expr -> Expr
-tanh = Tanh
-
+tanh :: Label -> G.NodeId -> State BPGraph G.NodeId
+tanh label a = do
+  nid <- addNode (GraphNode TanhNode label 0.0 0.0)
+  addEdge a nid
+  pure nid
 
 ----------------
 -- Evaluation --
 ----------------
 
-eval :: Expr -> Double
-eval (Value _ val _) = val
-eval (Add _ children) = sum (fmap eval children)
-eval (Mul _ children) = product (fmap eval children)
-eval (Tanh _ child) = P.tanh (eval child)
+forward :: BPGraph -> BPGraph
+forward graph = execState (mapM_ go (G.terminal graph)) graph
+  where
+    go :: G.NodeId -> State BPGraph ()
+    go nid = do
+      GraphNode op label _ grad <- fromJust <$> gets (G.getNode nid)
+      case op of
+        ValueNode -> pure ()
+        AddNode -> do
+          parents <- gets (G.parents nid)
+          vals <- forM parents $ \pid -> do
+            go pid
+            GraphNode _ _ val _ <- fromJust <$> gets (G.getNode pid)
+            return val
+          let newNode = GraphNode op label (sum vals) grad
+          modify (G.setNode nid newNode)
+        MulNode -> do
+          parents <- gets (G.parents nid)
+          vals <- forM parents $ \pid -> do
+            go pid
+            GraphNode _ _ val _ <- fromJust <$> gets (G.getNode pid)
+            return val
+          let newNode = GraphNode op label (product vals) grad
+          modify (G.setNode nid newNode)
+        TanhNode -> do
+          parents <- gets (G.parents nid)
+          case parents of
+            [pid] -> do
+              go pid
+              GraphNode _ _ val _ <- fromJust <$> gets (G.getNode pid)
+              let newNode = GraphNode op label (P.tanh val) grad
+              modify (G.setNode nid newNode)
+            x -> error $ "Tanh node has " <> show (length x) <> " parents"
 
-getValue :: EvalExpr -> Double
-getValue (Value _ val _) = val
-getValue (Add (EvalNode _ val) _) = val
-getValue (Mul (EvalNode _ val) _) = val
-getValue (Tanh (EvalNode _ val) _) = val
-
-evalExpr :: Expr -> EvalExpr
-evalExpr (Value label val grad) = Value label val grad
-evalExpr (Add label children) =
-  let children' = fmap evalExpr children
-      evalNode = EvalNode label (sum (fmap getValue children'))
-  in Add evalNode children'
-evalExpr (Mul label children) =
-  let children' = fmap evalExpr children
-      evalNode = EvalNode label (product (fmap getValue children'))
-  in Mul evalNode children'
-evalExpr (Tanh label child) =
-  let child' = evalExpr child
-      evalNode = EvalNode label (P.tanh (getValue child'))
-  in Tanh evalNode child'
-
+-- | Given a list, return a list of each element and all other elements of that
+-- list
 oneVsRest :: [a] -> [(a, [a])]
 oneVsRest [] = []
 oneVsRest as = reverse . fst $ foldr go ([], as) as
@@ -98,97 +147,125 @@ oneVsRest as = reverse . fst $ foldr go ([], as) as
     go _ (xs, []) = (xs, [])
     go _ (xs, y:ys) = ((y,ys) : xs, ys <> [y])
 
-backpropExpr' :: Double -> EvalExpr -> GradExpr
-backpropExpr' grad (Value label val _) = Value label val grad
-backpropExpr' grad (Add evalNode children) =
-  let EvalNode label val = evalNode
-      gradNode = GradNode label val grad
-      children' = fmap (backpropExpr' grad) children
-   in Add gradNode children'
-backpropExpr' grad (Mul evalNode children) =
-  let EvalNode label val = evalNode
-      gradNode = GradNode label val grad
-      computeGrad :: (EvalExpr, [EvalExpr]) -> Double
-      computeGrad (_, xs) = grad * product (fmap getValue xs)
-      grads = fmap computeGrad (oneVsRest children)
-      children' = zipWith backpropExpr' grads children
-   in Mul gradNode children'
-backpropExpr' grad (Tanh evalNode child) =
-  let EvalNode label val = evalNode
-      gradNode = GradNode label val grad
-      child' = backpropExpr' (grad * (1 - val * val)) child
-   in Tanh gradNode child'
-
-backpropExpr :: EvalExpr -> GradExpr
-backpropExpr = backpropExpr' 1.0
-
-
---------------
--- Graphing --
---------------
-
-newtype NodeId = NodeId Int
-
-data Node
-  = OpNode Label
-  | DataNode Label Double Double
-
-data Tree = Tree NodeId Node [Tree]
-
-getNodeId :: State Int NodeId
-getNodeId = do
-  nid <- get
-  put (nid + 1)
-  pure (NodeId nid)
-
-toTree' :: GradExpr -> State Int Tree
---
-toTree' (Value label val grad) = do
-  nid <- getNodeId
-  pure (Tree nid (DataNode label val grad) [])
---
-toTree' (Add gradNode children) = do
-  let GradNode label val grad = gradNode
-  children' <- traverse toTree' children
-  nid <- getNodeId
-  let inner = Tree nid (OpNode "+") children'
-  mid <- getNodeId
-  pure (Tree mid (DataNode label val grad) [inner])
---
-toTree' (Mul gradNode children) = do
-  let GradNode label val grad = gradNode
-  children' <- traverse toTree' children
-  nid <- getNodeId
-  let inner = Tree nid (OpNode "*") children'
-  mid <- getNodeId
-  pure (Tree mid (DataNode label val grad) [inner])
---
-toTree' (Tanh gradNode child) = do
-  let GradNode label val grad = gradNode
-  child' <- toTree' child
-  nid <- getNodeId
-  let inner = Tree nid (OpNode "tanh") [child']
-  mid <- getNodeId
-  pure (Tree mid (DataNode label val grad) [inner])
-
-toTree :: GradExpr -> Tree
-toTree expr = evalState (toTree' expr) 0
-
-nodeToDot :: NodeId -> Node -> DotLine
-nodeToDot (NodeId nid) (OpNode l) = opNode nid l
-nodeToDot (NodeId nid) (DataNode l v g) = dataNode nid l v g
-
-edgeToDot :: NodeId -> NodeId -> DotLine
-edgeToDot (NodeId i) (NodeId j) = edge i j
-
-treeToDot :: Tree -> Dot
-treeToDot (Tree nid n ts) =
-  [nodeToDot nid n] <> fmap toEdge ts <> concatMap treeToDot ts
+backprop :: BPGraph -> BPGraph
+backprop graph = flip execState graph $ do
+  let terminalNodes = G.terminal graph
+  mapM_ oneGrad terminalNodes
+  mapM_ go (G.terminal graph)
   where
-    toEdge :: Tree -> DotLine
-    toEdge (Tree mid _ _) = edgeToDot mid nid
+    oneGrad :: G.NodeId -> State BPGraph ()
+    oneGrad nid = do
+      GraphNode op label val _ <- fromJust <$> gets (G.getNode nid)
+      let newNode = GraphNode op label val 1.0
+      modify (G.setNode nid newNode)
 
-plotGraphPng :: FilePath -> Expr -> IO FilePath
-plotGraphPng fp expr = do
-  let dotFile = treeToDot (toTree (backpropExpr (evalExpr expr)))
-  plotPng fp dotFile
+    go :: G.NodeId -> State BPGraph ()
+    go nid = do
+      GraphNode op _ _ grad <- fromJust <$> gets (G.getNode nid)
+      case op of
+        ValueNode -> pure ()
+        AddNode -> do
+          parents <- gets (G.parents nid)
+          forM_ parents $ \pid -> do
+            GraphNode pop plabel pval pgrad <- fromJust <$> gets (G.getNode pid)
+            let newNode = GraphNode pop plabel pval (pgrad + grad)
+            modify (G.setNode pid newNode)
+            go pid
+        MulNode -> do
+          parents <- gets (G.parents nid)
+          parentVals <- forM parents $ \pid -> do
+            GraphNode _ _ val _ <- fromJust <$> gets (G.getNode pid)
+            return val
+          let rests = map snd (oneVsRest parentVals)
+          forM_ (zip parents rests) $ \(pid, rest) -> do
+            GraphNode pop plabel pval pgrad <- fromJust <$> gets (G.getNode pid)
+            let newNode = GraphNode pop plabel pval (pgrad + grad * product rest)
+            modify (G.setNode pid newNode)
+            go pid
+        TanhNode -> do
+          parents <- gets (G.parents nid)
+          case parents of
+            [pid] -> do
+              GraphNode pop plabel pval pgrad <- fromJust <$> gets (G.getNode pid)
+              let newGrad = pgrad + grad * (1 - P.tanh pval ** 2)
+                  newNode = GraphNode pop plabel pval newGrad
+              modify (G.setNode pid newNode)
+              go pid
+            x -> error $ "Tanh node has " <> show (length x) <> " parents"
+
+--------------
+-- Plotting --
+--------------
+
+type NodeMap = M.Map G.NodeId G.NodeId
+type TransformState = (PlotGraph, NodeMap, NodeMap)
+
+showNodeType :: NodeType -> String
+showNodeType ValueNode = error "ValueNode is not an operation"
+showNodeType AddNode = "+"
+showNodeType MulNode = "*"
+showNodeType TanhNode = "tanh"
+
+-- | Convert a BPGraph to a PlotGraph which:
+--   - Categorize nodes into data nodes and operation nodes
+--   - Split intermediate nodes in BPGraph into an operation and a data node
+toPlotGraph :: BPGraph -> PlotGraph
+toPlotGraph bpGraph =
+  let (plotGraph, _, _) = execState createPlotGraph (G.empty, M.empty, M.empty)
+   in plotGraph
+  where
+    createPlotGraph :: State TransformState ()
+    createPlotGraph = addDataNodes >> addOpNodes >> addEdges
+
+    addDataNode :: G.NodeId -> GraphNode -> State TransformState ()
+    addDataNode nid (GraphNode _ label val grad) = do
+      (plotGraph, dataNodeMap, opNodeMap) <- get
+      let node = dataNode label val grad
+          (nid', plotGraph') = G.addNode node plotGraph
+          dataNodeMap' = M.insert nid nid' dataNodeMap
+      put (plotGraph', dataNodeMap', opNodeMap)
+
+    addDataNodes :: State TransformState ()
+    addDataNodes = mapM_ (uncurry addDataNode) (M.toList (G.nodes bpGraph))
+
+    addOpNode :: G.NodeId -> GraphNode -> State TransformState ()
+    addOpNode nid GraphNode{..} =
+      case nodeType of
+        ValueNode -> pure ()
+        _ -> do
+          (plotGraph, dataNodeMap, opNodeMap) <- get
+          let node = opNode (showNodeType nodeType)
+              (nid', plotGraph') = G.addNode node plotGraph
+              opNodeMap' = M.insert nid nid' opNodeMap
+          put (plotGraph', dataNodeMap, opNodeMap')
+
+    addOpNodes :: State TransformState ()
+    addOpNodes = mapM_ (uncurry addOpNode) (M.toList (G.nodes bpGraph))
+
+    -- Add edge that already existed in the back propagation graph
+    addPrevEdge :: G.NodeId -> G.NodeId -> State TransformState ()
+    addPrevEdge nid1 nid2 = do
+      (plotGraph, dataNodeMap, opNodeMap) <- get
+      let nid1' = fromJust $ M.lookup nid1 dataNodeMap
+          nid2' = fromJust $ M.lookup nid2 opNodeMap
+          plotGraph' = G.addEdge nid1' nid2' plotGraph
+      put (plotGraph', dataNodeMap, opNodeMap)
+
+    -- Add new edge to connect the op nodes to their respective data nodes 
+    addOpEdge :: G.NodeId -> G.NodeId -> State TransformState ()
+    addOpEdge oldOpNode newOpNode = do
+      (plotGraph, dataNodeMap, opNodeMap) <- get
+      let source = newOpNode
+          target = fromJust $ M.lookup oldOpNode dataNodeMap
+          plotGraph' = G.addEdge source target plotGraph
+      put (plotGraph', dataNodeMap, opNodeMap)
+
+    addEdges :: State TransformState ()
+    addEdges = do
+      mapM_ (uncurry addPrevEdge) (G.edges bpGraph)
+      (_, _, opNodeMap) <- get
+      mapM_ (uncurry addOpEdge) (M.toList opNodeMap)
+
+-- | Plot a BPGraph to a PNG file using the Graphviz library
+plotGraphPng :: FilePath -> BPGraph -> IO FilePath
+plotGraphPng fp = plotPng fp . graphToDot . toPlotGraph  

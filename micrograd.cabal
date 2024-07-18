@@ -61,6 +61,7 @@ library
     -- Modules exported by the library.
     exposed-modules:
         Engine
+      , Graph
       , Graph.Dot
 
     -- Modules included in this library but not exported.
@@ -130,5 +131,8 @@ test-suite micrograd-test
 
     -- Test dependencies.
     build-depends:
-        base ^>=4.17.2.1,
-        micrograd
+        base ^>=4.17.2.1
+      , micrograd
+      , tasty
+      , tasty-hunit
+      , tasty-quickcheck
