@@ -23,5 +23,5 @@ main = do
       x2w2 <- mul "x2w2" x2 w2
       xw <- add "xw" x1w1 x2w2
       n <- add "n" xw b
-      _ <- tanh "o" n
-      pure ()
+      -- output
+      tanh "o" n

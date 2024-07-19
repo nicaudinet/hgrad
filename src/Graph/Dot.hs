@@ -55,7 +55,7 @@ graphToDot :: PlotGraph -> Dot
 graphToDot graph = nodes <> edges
   where
     toDotId :: G.NodeId -> DotId
-    toDotId = DotId . fromInteger . toInteger
+    toDotId = DotId . G.idToInt
 
     nodeToDotLine :: G.NodeId -> PlotNode -> DotLine
     nodeToDotLine nid node = DotNode (toDotId nid) node

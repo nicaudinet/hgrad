@@ -136,3 +136,4 @@ test-suite micrograd-test
       , tasty
       , tasty-hunit
       , tasty-quickcheck
+      , transformers

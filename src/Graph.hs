@@ -16,19 +16,20 @@ module Graph
   -- Edge operations
   , addEdge
   , getEdges
+  -- Convenience
+  , idToInt
   ) where
 
 import qualified Data.Map as M
 
 newtype NodeId = NodeId Int
-  deriving (Show, Eq, Ord, Enum, Num, Real, Integral)
+  deriving (Show, Eq, Ord)
 
 type Edge = (NodeId, NodeId)
 
 data Graph a =
   Graph
-    { counter :: Int
-    , nodes :: M.Map NodeId a
+    { nodes :: M.Map NodeId a
     , edges :: [Edge]
     }
   deriving Eq
@@ -36,8 +37,7 @@ data Graph a =
 empty :: Graph a
 empty =
   Graph
-    { counter = 0
-    , nodes = M.empty
+    { nodes = M.empty
     , edges = []
     }
 
@@ -45,25 +45,31 @@ empty =
 -- Node operations --
 ---------------------
 
+idToInt :: NodeId -> Int
+idToInt (NodeId x) = x
+
 addNode :: a -> Graph a -> (NodeId, Graph a)
 addNode node Graph{..} = (nid, graph)
   where 
-    nid = NodeId counter
+    nid = NodeId (length nodes)
     graph =
       Graph
-        { counter = counter + 1
-        , nodes = M.insert nid node nodes
+        { nodes = M.insert nid node nodes
         , edges = edges
         }
 
-getNode :: NodeId -> Graph a -> Maybe a
-getNode nid Graph{..} = M.lookup nid nodes 
+-- | Return the node associated with a NodeId
+-- Although this is a partial function, it's safe because:
+--   1. The user can only get a NodeId through addNode
+--   2. There's no way to update NodeIds in the graph API
+--   3. There's no way to delete NodeIds in the graph API
+getNode :: NodeId -> Graph a -> a
+getNode nid Graph{..} = nodes M.! nid
 
 setNode :: NodeId -> a -> Graph a -> Graph a
 setNode nid node Graph{..} =
   Graph
-    { counter = counter
-    , nodes = M.adjust (const node) nid nodes
+    { nodes = M.adjust (const node) nid nodes
     , edges = edges
     }
 
@@ -83,8 +89,6 @@ parents nid Graph{..} = map fst (filter ((== nid) . snd) edges)
 addEdge :: Eq a => NodeId -> NodeId -> Graph a -> Graph a 
 addEdge node1 node2 graph
   | node1 == node2 = graph
-  | getNode node1 graph == Nothing = graph
-  | getNode node2 graph == Nothing = graph
   | otherwise = graph { edges = (node1, node2) : edges graph }
 
 getEdges :: NodeId -> Graph a -> ([Edge], [Edge])

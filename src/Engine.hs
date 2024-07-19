@@ -23,8 +23,8 @@ import Prelude hiding (tanh)
 
 import Control.Monad (forM, forM_)
 import Control.Monad.Trans.State
-import Data.Maybe (fromJust)
 import qualified Data.Map as M
+import Data.Maybe (fromJust)
 import qualified Graph as G
 import Graph.Dot
 
@@ -108,14 +108,14 @@ forward graph = execState (mapM_ go (G.terminal graph)) graph
   where
     go :: G.NodeId -> State BPGraph ()
     go nid = do
-      GraphNode op label _ grad <- fromJust <$> gets (G.getNode nid)
+      GraphNode op label _ grad <- gets (G.getNode nid)
       case op of
         ValueNode -> pure ()
         AddNode -> do
           parents <- gets (G.parents nid)
           vals <- forM parents $ \pid -> do
             go pid
-            GraphNode _ _ val _ <- fromJust <$> gets (G.getNode pid)
+            GraphNode _ _ val _ <- gets (G.getNode pid)
             return val
           let newNode = GraphNode op label (sum vals) grad
           modify (G.setNode nid newNode)
@@ -123,7 +123,7 @@ forward graph = execState (mapM_ go (G.terminal graph)) graph
           parents <- gets (G.parents nid)
           vals <- forM parents $ \pid -> do
             go pid
-            GraphNode _ _ val _ <- fromJust <$> gets (G.getNode pid)
+            GraphNode _ _ val _ <- gets (G.getNode pid)
             return val
           let newNode = GraphNode op label (product vals) grad
           modify (G.setNode nid newNode)
@@ -132,7 +132,7 @@ forward graph = execState (mapM_ go (G.terminal graph)) graph
           case parents of
             [pid] -> do
               go pid
-              GraphNode _ _ val _ <- fromJust <$> gets (G.getNode pid)
+              GraphNode _ _ val _ <- gets (G.getNode pid)
               let newNode = GraphNode op label (P.tanh val) grad
               modify (G.setNode nid newNode)
             x -> error $ "Tanh node has " <> show (length x) <> " parents"
@@ -155,30 +155,30 @@ backprop graph = flip execState graph $ do
   where
     oneGrad :: G.NodeId -> State BPGraph ()
     oneGrad nid = do
-      GraphNode op label val _ <- fromJust <$> gets (G.getNode nid)
+      GraphNode op label val _ <- gets (G.getNode nid)
       let newNode = GraphNode op label val 1.0
       modify (G.setNode nid newNode)
 
     go :: G.NodeId -> State BPGraph ()
     go nid = do
-      GraphNode op _ _ grad <- fromJust <$> gets (G.getNode nid)
+      GraphNode op _ _ grad <- gets (G.getNode nid)
       case op of
         ValueNode -> pure ()
         AddNode -> do
           parents <- gets (G.parents nid)
           forM_ parents $ \pid -> do
-            GraphNode pop plabel pval pgrad <- fromJust <$> gets (G.getNode pid)
+            GraphNode pop plabel pval pgrad <- gets (G.getNode pid)
             let newNode = GraphNode pop plabel pval (pgrad + grad)
             modify (G.setNode pid newNode)
             go pid
         MulNode -> do
           parents <- gets (G.parents nid)
           parentVals <- forM parents $ \pid -> do
-            GraphNode _ _ val _ <- fromJust <$> gets (G.getNode pid)
+            GraphNode _ _ val _ <- gets (G.getNode pid)
             return val
           let rests = map snd (oneVsRest parentVals)
           forM_ (zip parents rests) $ \(pid, rest) -> do
-            GraphNode pop plabel pval pgrad <- fromJust <$> gets (G.getNode pid)
+            GraphNode pop plabel pval pgrad <- gets (G.getNode pid)
             let newNode = GraphNode pop plabel pval (pgrad + grad * product rest)
             modify (G.setNode pid newNode)
             go pid
@@ -186,7 +186,7 @@ backprop graph = flip execState graph $ do
           parents <- gets (G.parents nid)
           case parents of
             [pid] -> do
-              GraphNode pop plabel pval pgrad <- fromJust <$> gets (G.getNode pid)
+              GraphNode pop plabel pval pgrad <- gets (G.getNode pid)
               let newGrad = pgrad + grad * (1 - P.tanh pval ** 2)
                   newNode = GraphNode pop plabel pval newGrad
               modify (G.setNode pid newNode)
