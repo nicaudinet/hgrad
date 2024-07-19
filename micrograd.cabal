@@ -63,6 +63,7 @@ library
         Engine
       , Graph
       , Graph.Dot
+      , Neuron
 
     -- Modules included in this library but not exported.
     -- other-modules:
@@ -74,6 +75,7 @@ library
     build-depends:
         base ^>=4.17.2.1
       , containers
+      , MonadRandom
       , process
       , transformers
 

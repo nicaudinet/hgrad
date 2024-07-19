@@ -10,6 +10,12 @@ module Engine
   , add
   , mul
   , tanh
+  , sumNodes
+  , prodNodes
+  -- convenience functions
+  , getVal
+  , getGrad
+  , setVal
   -- evaluation
   , forward
   , backprop
@@ -72,6 +78,19 @@ addNode node = do
 addEdge :: Eq a => G.NodeId -> G.NodeId -> State (G.Graph a) ()
 addEdge nid1 nid2 = modify (G.addEdge nid1 nid2)
 
+getVal :: G.NodeId -> BPGraph -> Double
+getVal nid graph = nodeVal (G.getNode nid graph)
+
+getGrad :: G.NodeId -> BPGraph -> Double
+getGrad nid graph = nodeGrad (G.getNode nid graph)
+
+setVal :: G.NodeId -> Double -> BPGraph -> BPGraph
+setVal nid val graph =
+  let node = G.getNode nid graph
+      newNode = node { nodeVal = val }
+   in G.setNode nid newNode graph
+
+
 ------------------
 -- Constructors --
 ------------------
@@ -99,6 +118,17 @@ tanh label a = do
   addEdge a nid
   pure nid
 
+sumNodes :: Label -> [G.NodeId] -> State BPGraph G.NodeId 
+sumNodes label inputs = do
+  nid <- addNode (GraphNode AddNode label 0.0 0.0)
+  mapM_ (flip addEdge nid) inputs
+  pure nid
+
+prodNodes :: Label -> [G.NodeId] -> State BPGraph G.NodeId 
+prodNodes label inputs = do
+  nid <- addNode (GraphNode MulNode label 0.0 0.0)
+  mapM_ (flip addEdge nid) inputs
+  pure nid
 ----------------
 -- Evaluation --
 ----------------

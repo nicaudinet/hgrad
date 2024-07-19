@@ -9,12 +9,13 @@ import qualified Test.Tasty.QuickCheck as QC
 
 import qualified Engine as E
 import qualified Graph as G
+import qualified Neuron as N
 
 main :: IO ()
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Tests" [ propsGraph, testsBackprop ]
+tests = testGroup "Tests" [ propsGraph, testsBackprop, testsNeuron ]
 
 --------------------------
 -- Graph property tests --
@@ -52,14 +53,10 @@ testsBackprop :: TestTree
 testsBackprop = testGroup "Backprop unit Tests"
   [ testCase "b = a + a" test1
   , testCase "f = (a + b) * (a * b)" test2
+  , testCase "sum: e = a + b + c + d" test3
+  , testCase "prod: e = a * b * c * d" test4
   ]
   where
-    getVal :: G.NodeId -> E.BPGraph -> Double
-    getVal nid graph = E.nodeVal (G.getNode nid graph)
-
-    getGrad :: G.NodeId -> E.BPGraph -> Double
-    getGrad nid graph = E.nodeGrad (G.getNode nid graph)
-
     test1 = do
       let (nids, graph) = flip runState G.empty $ do
             a <- E.value "a" 3.0
@@ -67,8 +64,8 @@ testsBackprop = testGroup "Backprop unit Tests"
             pure (a, b)
       let graph' = E.backprop (E.forward graph)
       let (a, b) = nids
-      assertEqual "value of b" 6.0 (getVal b graph')
-      assertEqual "gradient a" 2.0 (getGrad a graph')
+      assertEqual "value of b" 6.0 (E.getVal b graph')
+      assertEqual "gradient a" 2.0 (E.getGrad a graph')
 
     test2 = do
       let (nids, graph) = flip runState G.empty $ do
@@ -80,6 +77,61 @@ testsBackprop = testGroup "Backprop unit Tests"
             pure (a, b, f)
       let graph' = E.backprop (E.forward graph)
       let (a, b, f) = nids
-      assertEqual "value of f" (-6.0) (getVal f graph')
-      assertEqual "gradient a" (-3.0) (getGrad a graph')
-      assertEqual "gradient b" (-8.0) (getGrad b graph')
+      assertEqual "value of f" (-6.0) (E.getVal f graph')
+      assertEqual "gradient a" (-3.0) (E.getGrad a graph')
+      assertEqual "gradient b" (-8.0) (E.getGrad b graph')
+
+    test3 = do
+      let (nids, graph) = flip runState G.empty $ do
+            a <- E.value "a" 1.0
+            b <- E.value "b" 2.0
+            c <- E.value "c" 3.0
+            d <- E.value "d" 4.0
+            e <- E.sumNodes "e" [a, b, c, d]
+            pure (a, b, c, d, e)
+      let graph' = E.backprop (E.forward graph)
+      let (a, b, c, d, e) = nids
+      assertEqual "value of e" 10.0 (E.getVal e graph')
+      assertEqual "gradient a"  1.0 (E.getGrad a graph')
+      assertEqual "gradient b"  1.0 (E.getGrad b graph')
+      assertEqual "gradient c"  1.0 (E.getGrad c graph')
+      assertEqual "gradient d"  1.0 (E.getGrad d graph')
+
+    test4 = do
+      let (nids, graph) = flip runState G.empty $ do
+            a <- E.value "a" 1.0
+            b <- E.value "b" 2.0
+            c <- E.value "c" 3.0
+            d <- E.value "d" 4.0
+            e <- E.prodNodes "e" [a, b, c, d]
+            pure (a, b, c, d, e)
+      let graph' = E.backprop (E.forward graph)
+      let (a, b, c, d, e) = nids
+      assertEqual "value of e" 24.0 (E.getVal e graph')
+      assertEqual "gradient a" 24.0 (E.getGrad a graph')
+      assertEqual "gradient b" 12.0 (E.getGrad b graph')
+      assertEqual "gradient c"  8.0 (E.getGrad c graph')
+      assertEqual "gradient d"  6.0 (E.getGrad d graph')
+
+-----------------------
+-- Neuron unit tests --
+-----------------------
+
+testsNeuron :: TestTree
+testsNeuron = testGroup "Neuron unit Tests"
+  [ testCase "simple neuron with two inputs" simpleNeuron ]
+  where
+    simpleNeuron = do
+      ((i1, i2, neuron, params), graph) <- N.runGraphMaker $ do
+        i1 <- N.value "i1" 1.0
+        i2 <- N.value "i2" 2.0
+        (neuron, params) <- N.neuron [i1, i2]
+        pure (i1, i2, neuron, params)
+      let graph' = foldr (\nid g -> E.setVal nid 1.0 g) graph params
+      let graph'' = E.backprop (E.forward graph')
+      assertEqual "value of i1" 1.0 (E.getVal i1 graph'')
+      assertEqual "value of i2" 2.0 (E.getVal i2 graph'')
+      let neuronVal = E.getVal neuron graph''
+      assertEqual "value of neuron" (tanh 4.0) neuronVal
+      assertEqual "gradient of i1" (1.0 - neuronVal ** 2) (E.getGrad i1 graph'')
+      assertEqual "gradient of i2" (1.0 - neuronVal ** 2) (E.getGrad i2 graph'')
