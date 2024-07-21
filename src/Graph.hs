@@ -11,6 +11,7 @@ module Graph
   , addNode
   , getNode
   , setNode
+  , setNodes
   , terminal
   , parents
   -- Edge operations
@@ -72,6 +73,9 @@ setNode nid node Graph{..} =
     { nodes = M.adjust (const node) nid nodes
     , edges = edges
     }
+
+setNodes :: Graph a -> [(NodeId, a)]-> Graph a
+setNodes = foldr (uncurry setNode)
 
 -- | Return a list of terminal nodes (nodes with no outgoing edges)
 terminal :: Graph a -> [NodeId]

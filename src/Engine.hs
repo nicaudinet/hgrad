@@ -9,6 +9,8 @@ module Engine
   , value
   , add
   , mul
+  , neg
+  , sub
   , tanh
   , sumNodes
   , prodNodes
@@ -16,6 +18,7 @@ module Engine
   , getVal
   , getGrad
   , setVal
+  , setVals
   -- evaluation
   , forward
   , backprop
@@ -90,6 +93,9 @@ setVal nid val graph =
       newNode = node { nodeVal = val }
    in G.setNode nid newNode graph
 
+setVals :: BPGraph -> [(G.NodeId, Double)] -> BPGraph
+setVals = foldr (uncurry setVal)
+
 
 ------------------
 -- Constructors --
@@ -111,6 +117,16 @@ mul label a b = do
   addEdge a nid
   addEdge b nid
   pure nid
+
+neg :: Label -> G.NodeId -> State BPGraph G.NodeId
+neg label a = do
+  minusOne <- value "" (-1.0)
+  mul label a minusOne
+
+sub :: Label -> G.NodeId -> G.NodeId -> State BPGraph G.NodeId
+sub label a b = do
+  negB <- neg "" b
+  add label a negB
 
 tanh :: Label -> G.NodeId -> State BPGraph G.NodeId
 tanh label a = do
