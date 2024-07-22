@@ -8,7 +8,7 @@ module Graph.Dot
   , dataNode
   , graphToDot
   -- printing
-  , plotPng
+  , plotSVG
   ) where
 
 import Data.List (intercalate) 
@@ -90,10 +90,10 @@ printDot dotLines =
     start = ["digraph G {", "rankdir = LR", ""]
     end = ["", "}"]
 
-plotPng :: FilePath -> Dot -> IO FilePath
-plotPng fp dot = do
+plotSVG :: FilePath -> Dot -> IO FilePath
+plotSVG fp dot = do
   let dotFile = fp <> ".dot"
-      pngFile = fp <> ".png"
+      pngFile = fp <> ".svg"
   writeFile dotFile (printDot dot)
-  callProcess "dot" ["-Tpng", "-o", pngFile, dotFile]
+  callProcess "dot" ["-Tsvg", "-o", pngFile, dotFile]
   pure pngFile

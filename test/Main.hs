@@ -122,16 +122,19 @@ testsNeuron = testGroup "Neuron unit Tests"
   [ testCase "simple neuron with two inputs" simpleNeuron ]
   where
     simpleNeuron = do
-      ((i1, i2, neuron, params), graph) <- N.runGraphMaker $ do
+      ((i1, i2, neuron), graph0) <- N.runGraphMaker $ do
+        params <- N.neuronInit 2
         i1 <- N.value "i1" 1.0
         i2 <- N.value "i2" 2.0
-        (neuron, params) <- N.neuron [i1, i2]
-        pure (i1, i2, neuron, params)
-      let graph' = foldr (\nid g -> E.setVal nid 1.0 g) graph params
-      let graph'' = E.backprop (E.forward graph')
-      assertEqual "value of i1" 1.0 (E.getVal i1 graph'')
-      assertEqual "value of i2" 2.0 (E.getVal i2 graph'')
-      let neuronVal = E.getVal neuron graph''
+        neuron <- N.neuronCall [i1, i2] params
+        pure (i1, i2, neuron)
+      let params = N.getParamsNeuron (N.neuronParams neuron)
+      let graph1 = E.setVals graph0 (zip params (repeat 1))
+      let graph2 = E.forward graph1
+      assertEqual "value of i1" 1.0 (E.getVal i1 graph2)
+      assertEqual "value of i2" 2.0 (E.getVal i2 graph2)
+      let neuronVal = E.getVal (N.neuronOutput neuron) graph2
       assertEqual "value of neuron" (tanh 4.0) neuronVal
-      assertEqual "gradient of i1" (1.0 - neuronVal ** 2) (E.getGrad i1 graph'')
-      assertEqual "gradient of i2" (1.0 - neuronVal ** 2) (E.getGrad i2 graph'')
+      let graph3 = E.backprop graph2
+      assertEqual "gradient of i1" (1.0 - neuronVal ** 2) (E.getGrad i1 graph3)
+      assertEqual "gradient of i2" (1.0 - neuronVal ** 2) (E.getGrad i2 graph3)

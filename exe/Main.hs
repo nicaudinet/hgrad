@@ -2,7 +2,10 @@ module Main where
 
 import Prelude hiding (tanh)
 
-import Engine (forward, backprop, plotGraphPng)
+import Graphics.Rendering.Chart.Easy
+import Graphics.Rendering.Chart.Backend.Diagrams
+
+import Engine (plotGraphSVG)
 import qualified Neuron as N
 
 xs :: [[Double]]
@@ -21,11 +24,19 @@ ys =
   , [1.0]
   ]
 
+enumerate :: [a] -> [(Int, a)]
+enumerate = zip [0..]
+
 main :: IO ()
 main = do
-  graph <- N.execGraphMaker $ do
-    network <- N.networkInit 3 [3, 1]
-    N.mseLoss xs ys network
-  -- print (N.predict mlp graph (head xs), head ys)
-  fp <- plotGraphPng "graph" (backprop (forward graph))
+  let ((network, losses), graph) = N.runGraphMakerPure 0 $ do
+        network <- N.networkInit 3 [4, 4, 1]
+        losses <- N.train 0.05 20 xs ys network
+        pure (network, losses)
+  print (length (N.getParamsNetwork network))
+  fp <- plotGraphSVG "graph" graph
   putStrLn ("Graph written to " ++ fp)
+  mapM_ print losses
+  toFile def "loss.svg" $ do
+    layout_title .= "Training Loss"
+    plot (line "Loss" [enumerate losses])

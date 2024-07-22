@@ -2,9 +2,11 @@
 
 module Neuron
   -- Types
-  ( Network(..)
+  ( Neuron(..)
+  , Network(..)
   -- Runners
   , runGraphMaker
+  , runGraphMakerPure
   , execGraphMaker
   -- Neural network constructors
   , value
@@ -13,12 +15,16 @@ module Neuron
   , neuronInit
   , layerInit
   , networkInit
+  , getParamsNeuron
+  , getParamsLayer
+  , getParamsNetwork
   -- Call the network
   , neuronCall
   , layerCall
   , networkCall
   -- Loss functions
   , mseLoss
+  , train
   ) where
 
 import Control.Monad.Random
@@ -67,6 +73,10 @@ runGraphMaker :: GraphMaker a -> IO (a, E.BPGraph)
 runGraphMaker m = do
   gen <- getStdGen
   pure $ runState (evalRandT m gen) G.empty
+
+runGraphMakerPure :: Int -> GraphMaker a -> (a, E.BPGraph)
+runGraphMakerPure i m = do
+  runState (evalRandT m (mkStdGen i)) G.empty
 
 execGraphMaker :: GraphMaker a -> IO E.BPGraph
 execGraphMaker m = do
@@ -149,3 +159,32 @@ mseLoss xs ys networkParams = do
     E.sumNodes "" subs
   b <- lift $ mapM (\x -> E.mul "" x x) a
   lift $ E.sumNodes "" b
+
+getParamsNeuron :: NeuronParams -> [G.NodeId]
+getParamsNeuron NeuronParams{..} = bias : weights
+
+getParamsLayer :: LayerParams -> [G.NodeId]
+getParamsLayer = concatMap getParamsNeuron
+
+getParamsNetwork :: NetworkParams -> [G.NodeId]
+getParamsNetwork = concatMap getParamsLayer
+
+nudge :: Double -> G.NodeId -> GraphMaker ()
+nudge lr nid = lift $ do
+  node <- E.getNode nid
+  let node' = node { E.nodeVal = E.nodeVal node - lr * E.nodeGrad node }
+  E.setNode nid node'
+
+train
+  :: Double
+  -> Int
+  -> [[Double]]
+  -> [[Double]]
+  -> NetworkParams
+  -> GraphMaker [Double]
+train lr epochs xs ys networkParams = do
+  loss <- mseLoss xs ys networkParams
+  replicateM epochs $ do
+    lift $ modify (E.backprop . E.forward)
+    mapM_ (nudge lr) (getParamsNetwork networkParams)
+    lift $ gets (E.getVal loss)

@@ -15,15 +15,17 @@ module Engine
   , sumNodes
   , prodNodes
   -- convenience functions
+  , getNode
   , getVal
   , getGrad
+  , setNode
   , setVal
   , setVals
   -- evaluation
   , forward
   , backprop
   -- plotting
-  , plotGraphPng
+  , plotGraphSVG
   )
 where
 
@@ -81,11 +83,17 @@ addNode node = do
 addEdge :: Eq a => G.NodeId -> G.NodeId -> State (G.Graph a) ()
 addEdge nid1 nid2 = modify (G.addEdge nid1 nid2)
 
+getNode :: G.NodeId -> State (G.Graph a) a
+getNode nid = gets (G.getNode nid)
+
 getVal :: G.NodeId -> BPGraph -> Double
 getVal nid graph = nodeVal (G.getNode nid graph)
 
 getGrad :: G.NodeId -> BPGraph -> Double
 getGrad nid graph = nodeGrad (G.getNode nid graph)
+
+setNode :: G.NodeId -> a -> State (G.Graph a) ()
+setNode nid node = modify (G.setNode nid node)
 
 setVal :: G.NodeId -> Double -> BPGraph -> BPGraph
 setVal nid val graph =
@@ -96,6 +104,11 @@ setVal nid val graph =
 setVals :: BPGraph -> [(G.NodeId, Double)] -> BPGraph
 setVals = foldr (uncurry setVal)
 
+zeroGrad :: BPGraph -> BPGraph
+zeroGrad graph =
+  let zero node = node { nodeGrad = 0.0 }
+      zeroNodes = fmap zero (G.nodes graph)
+   in graph { G.nodes = zeroNodes }
 
 ------------------
 -- Constructors --
@@ -145,6 +158,7 @@ prodNodes label inputs = do
   nid <- addNode (GraphNode MulNode label 0.0 0.0)
   mapM_ (flip addEdge nid) inputs
   pure nid
+
 ----------------
 -- Evaluation --
 ----------------
@@ -196,6 +210,7 @@ oneVsRest as = reverse . fst $ foldr go ([], as) as
 backprop :: BPGraph -> BPGraph
 backprop graph = flip execState graph $ do
   let terminalNodes = G.terminal graph
+  modify zeroGrad
   mapM_ oneGrad terminalNodes
   mapM_ go (G.terminal graph)
   where
@@ -312,6 +327,5 @@ toPlotGraph bpGraph =
       (_, _, opNodeMap) <- get
       mapM_ (uncurry addOpEdge) (M.toList opNodeMap)
 
--- | Plot a BPGraph to a PNG file using the Graphviz library
-plotGraphPng :: FilePath -> BPGraph -> IO FilePath
-plotGraphPng fp = plotPng fp . graphToDot . toPlotGraph  
+plotGraphSVG :: FilePath -> BPGraph -> IO FilePath
+plotGraphSVG fp = plotSVG fp . graphToDot . toPlotGraph

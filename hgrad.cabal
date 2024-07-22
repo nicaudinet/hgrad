@@ -1,4 +1,4 @@
-cabal-version:      3.0
+cabal-version: 3.0
 -- The cabal-version field refers to the version of the .cabal specification,
 -- and can be different from the cabal-install (the tool) version and the
 -- Cabal (the library) version you are using. As such, the Cabal (the library)
@@ -11,7 +11,8 @@ cabal-version:      3.0
 --   http://haskell.org/cabal/users-guide/
 --
 -- The name of the package.
-name:               hgrad
+name:
+    hgrad
 
 -- The package version.
 -- See the Haskell package versioning policy (PVP) for standards
@@ -29,24 +30,31 @@ version:            0.1.0.0
 -- description:
 
 -- The license under which the package is released.
-license:            MIT
+license:
+    MIT
 
 -- The file containing the license text.
-license-file:       LICENSE
+license-file:
+    LICENSE
 
 -- The package author(s).
-author:             Nicolas Audinet de Pieuchon
+author:
+    Nicolas Audinet de Pieuchon
 
 -- An email address to which users can send suggestions, bug reports, and patches.
-maintainer:         nic.audinet27@gmail.com
+maintainer:
+    nic.audinet27@gmail.com
 
 -- A copyright notice.
 -- copyright:
-category:           Machine Learning
-build-type:         Simple
+category:
+    Machine Learning
+
+build-type:
+    Simple
 
 -- Extra doc files to be distributed with the package, such as a CHANGELOG or a README.
-extra-doc-files:    CHANGELOG.md
+-- extra-doc-files:
 
 -- Extra source files to be distributed with the package, such as examples, or a tutorial module.
 -- extra-source-files:
@@ -56,7 +64,8 @@ common warnings
 
 library
     -- Import common warning flags.
-    import:           warnings
+    import:
+      warnings
 
     -- Modules exported by the library.
     exposed-modules:
@@ -80,17 +89,21 @@ library
       , transformers
 
     -- Directories containing source files.
-    hs-source-dirs:   src
+    hs-source-dirs:
+        src
 
     -- Base language which the package is written in.
-    default-language: Haskell2010
+    default-language:
+        Haskell2010
 
 executable hgrad
     -- Import common warning flags.
-    import:           warnings
+    import:
+      warnings
 
     -- .hs or .lhs file containing the Main module.
-    main-is:          Main.hs
+    main-is:
+      Main.hs
 
     -- Modules included in this executable, other than Main.
     -- other-modules:
@@ -100,21 +113,27 @@ executable hgrad
 
     -- Other library packages from which modules are imported.
     build-depends:
-        base ^>=4.17.2.1,
-        hgrad
+        base ^>=4.17.2.1
+      , hgrad
+      , Chart
+      , Chart-diagrams
 
     -- Directories containing source files.
-    hs-source-dirs:   exe
+    hs-source-dirs:
+        exe
 
     -- Base language which the package is written in.
-    default-language: Haskell2010
+    default-language:
+        Haskell2010
 
 test-suite hgrad-test
     -- Import common warning flags.
-    import:           warnings
+    import:
+        warnings
 
     -- Base language which the package is written in.
-    default-language: Haskell2010
+    default-language:
+        Haskell2010
 
     -- Modules included in this executable, other than Main.
     -- other-modules:
@@ -123,13 +142,16 @@ test-suite hgrad-test
     -- other-extensions:
 
     -- The interface type and version of the test suite.
-    type:             exitcode-stdio-1.0
+    type:
+        exitcode-stdio-1.0
 
     -- Directories containing source files.
-    hs-source-dirs:   test
+    hs-source-dirs:
+        test
 
     -- The entrypoint to the test suite.
-    main-is:          Main.hs
+    main-is:
+        Main.hs
 
     -- Test dependencies.
     build-depends:
