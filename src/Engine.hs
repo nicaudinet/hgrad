@@ -1,200 +1,333 @@
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Engine
-  -- types
-  ( BPGraph
-  , GraphNode(..)
-  -- constructors
-  , makeGraph
+
+  -- * Types
+  ( NodeOp(..)
+  , CGraph
+  , Payload(..)
+
+  -- * AutoGradT
+  , AutoGradT
+  , runAutoGradT
+  , evalAutoGradT
+  , execAutoGradT
+
+  -- * AutoGradT
+  , AutoGrad
+  , runAutoGrad
+  , runAutoGradIO
+  , evalAutoGrad
+  , execAutoGrad
+
+  -- * Manipulating the computational graph
+  --
+  -- ** Inserting
+  -- | All nodes are initialised with a gradient of 0.0. All non-value nodes are
+  -- also initialized with a value of 0.0.
+
+  -- *** Primitive inserts
   , value
+  , randomValue
   , add
+  , sum
   , mul
+  , prod
+  , tanh
+
+  -- *** Composite inserts
   , neg
   , sub
-  , tanh
-  , sumNodes
-  , prodNodes
-  -- convenience functions
-  , getNode
-  , getVal
-  , getGrad
-  , setNode
-  , setVal
-  , setVals
-  -- evaluation
+
+  -- ** Getting
+  , getNodePayload
+  , getNodeOp
+  , getNodeLabel
+  , getNodeVal
+  , getNodeGrad
+  , getNodes
+  , getParentNodes
+
+  -- ** Setting
+  , setNodePayload
+  , setNodeLabel
+  , setNodeVal
+  , setNodeVals
+  , setNodeGrad
+  , setNodeGrads
+  , zeroGrad
+
+  -- * Graph operations
   , forward
   , backprop
-  -- plotting
-  , plotGraphSVG
   )
+
 where
 
-import qualified Prelude as P (tanh)
-import Prelude hiding (tanh)
+import qualified Prelude as P (sum, tanh)
+import Prelude hiding (sum, tanh)
 
-import Control.Monad (forM, forM_)
+import Control.Monad.Random
 import Control.Monad.Trans.State
+import Data.Functor.Identity
 import qualified Data.Map as M
-import Data.Maybe (fromJust)
+
 import qualified Graph as G
-import Graph.Dot
 
 -----------
 -- Types --
 -----------
 
+-- | A descriptor for each node in the computational graph
 type Label = String
 
--- | Types of nodes
-data NodeType
-  = ValueNode
-  | AddNode
-  | MulNode
-  | TanhNode
+-- | Operations that a node can represent in the computational graph
+data NodeOp
+  = ValueOp
+  | AddOp
+  | MulOp
+  | TanhOp
   deriving (Eq)
 
--- | Data type for the contents of a graph node
-data GraphNode =
-  GraphNode
-    { nodeType :: NodeType
+-- | Payload for each node in the computational graph
+data Payload =
+  Payload
+    { nodeType :: NodeOp
     , nodeLabel :: Label
     , nodeVal :: Double
     , nodeGrad :: Double
     }
   deriving (Eq)
 
--- | Back Propagation Graph
-type BPGraph = G.Graph GraphNode
+-- | The computational graph
+type CGraph = G.Graph Payload
 
-----------------------
--- Graph Primitives --
-----------------------
+---------------
+-- AutoGradT --
+---------------
 
-makeGraph :: State (G.Graph a) b -> G.Graph a
-makeGraph = flip execState G.empty
+-- | The AutoGradT monad transformer for constructing and executing actions over
+-- the computational graph. AutoGradT includes:
+--
+--   * A state monad to store and  access to the computational graph
+--
+--   * A random monad for generating random weights and biases
+type AutoGradT m a = StateT CGraph (RandT StdGen m) a
 
-addNode :: a -> State (G.Graph a) G.NodeId
-addNode node = do
+runAutoGradT :: Monad m => AutoGradT m a -> StdGen -> m (a, CGraph)
+runAutoGradT ma = evalRandT (runStateT ma G.empty)
+
+evalAutoGradT :: Monad m => AutoGradT m a -> StdGen -> m a
+evalAutoGradT ma = evalRandT (evalStateT ma G.empty)
+
+execAutoGradT :: Monad m => AutoGradT m a -> StdGen -> m CGraph
+execAutoGradT ma = evalRandT (execStateT ma G.empty)
+
+--------------
+-- AutoGrad --
+--------------
+
+type AutoGrad a = AutoGradT Identity a
+
+runAutoGrad :: AutoGrad a -> StdGen -> (a, CGraph)
+runAutoGrad m = evalRand (runStateT m G.empty)
+
+runAutoGradIO :: AutoGrad a -> IO (a, CGraph)
+runAutoGradIO m = runAutoGrad m <$> getStdGen
+
+evalAutoGrad :: AutoGrad a -> StdGen -> a
+evalAutoGrad m = evalRand (evalStateT m G.empty)
+
+execAutoGrad :: AutoGrad a -> StdGen -> CGraph
+execAutoGrad m = evalRand (execStateT m G.empty)
+
+------------------------------------------
+-- Manipulating the computational graph --
+------------------------------------------
+
+---------------
+-- Inserting --
+---------------
+
+-- | Insert a node into the computational graph
+insertNode :: Monad m => Payload -> AutoGradT m G.NodeId
+insertNode payload = do
   graph <- get
-  let (nid, graph') = G.addNode node graph
+  let (nid, graph') = G.insertNode payload graph
   put graph'
   pure nid
 
-addEdge :: Eq a => G.NodeId -> G.NodeId -> State (G.Graph a) ()
-addEdge nid1 nid2 = modify (G.addEdge nid1 nid2)
+-- | Insert an edge between two existing nodes in the computational graph
+insertEdge :: Monad m => G.NodeId -> G.NodeId -> AutoGradT m ()
+insertEdge nid1 nid2 = modify (G.insertEdge nid1 nid2)
 
-getNode :: G.NodeId -> State (G.Graph a) a
-getNode nid = gets (G.getNode nid)
+-----------------------
+-- Primitive inserts --
+-----------------------
 
-getVal :: G.NodeId -> BPGraph -> Double
-getVal nid graph = nodeVal (G.getNode nid graph)
+-- | Insert a value node into the computational graph
+value :: Monad m => Label -> Double -> AutoGradT m G.NodeId
+value label val = insertNode (Payload ValueOp label val 0.0)
 
-getGrad :: G.NodeId -> BPGraph -> Double
-getGrad nid graph = nodeGrad (G.getNode nid graph)
+-- | Insert a random value between -1 and 1
+randomValue :: Monad m => AutoGradT m G.NodeId
+randomValue = getRandomR (-1.0, 1.0) >>= value ""
 
-setNode :: G.NodeId -> a -> State (G.Graph a) ()
-setNode nid node = modify (G.setNode nid node)
-
-setVal :: G.NodeId -> Double -> BPGraph -> BPGraph
-setVal nid val graph =
-  let node = G.getNode nid graph
-      newNode = node { nodeVal = val }
-   in G.setNode nid newNode graph
-
-setVals :: BPGraph -> [(G.NodeId, Double)] -> BPGraph
-setVals = foldr (uncurry setVal)
-
-zeroGrad :: BPGraph -> BPGraph
-zeroGrad graph =
-  let zero node = node { nodeGrad = 0.0 }
-      zeroNodes = fmap zero (G.nodes graph)
-   in graph { G.nodes = zeroNodes }
-
-------------------
--- Constructors --
-------------------
-
-value :: Label -> Double -> State BPGraph G.NodeId
-value label val = addNode (GraphNode ValueNode label val 0.0)
-
-add :: Label -> G.NodeId -> G.NodeId -> State BPGraph G.NodeId 
+-- | Insert a binary addition node into the computational graph
+add :: Monad m => Label -> G.NodeId -> G.NodeId -> AutoGradT m G.NodeId 
 add label a b = do
-  nid <- addNode (GraphNode AddNode label 0.0 0.0)
-  addEdge a nid
-  addEdge b nid
+  nid <- insertNode (Payload AddOp label 0.0 0.0)
+  insertEdge a nid
+  insertEdge b nid
   pure nid
 
-mul :: Label -> G.NodeId -> G.NodeId -> State BPGraph G.NodeId
+-- | Insert an addition node into the computational graph
+sum :: Monad m => Label -> [G.NodeId] -> AutoGradT m G.NodeId 
+sum label inputs = do
+  nid <- insertNode (Payload AddOp label 0.0 0.0)
+  mapM_ (flip insertEdge nid) inputs
+  pure nid
+
+-- | Insert a binary multiplication node into the computational graph
+mul :: Monad m => Label -> G.NodeId -> G.NodeId -> AutoGradT m G.NodeId
 mul label a b = do
-  nid <- addNode (GraphNode MulNode label 0.0 0.0)
-  addEdge a nid
-  addEdge b nid
+  nid <- insertNode (Payload MulOp label 0.0 0.0)
+  insertEdge a nid
+  insertEdge b nid
   pure nid
 
-neg :: Label -> G.NodeId -> State BPGraph G.NodeId
+-- | Insert a multiplication node into the computational graph
+prod :: Monad m => Label -> [G.NodeId] -> AutoGradT m G.NodeId 
+prod label inputs = do
+  nid <- insertNode (Payload MulOp label 0.0 0.0)
+  mapM_ (flip insertEdge nid) inputs
+  pure nid
+
+-- | Insert a tanh node into the computational graph
+tanh :: Monad m => Label -> G.NodeId -> AutoGradT m G.NodeId
+tanh label a = do
+  nid <- insertNode (Payload TanhOp label 0.0 0.0)
+  insertEdge a nid
+  pure nid
+
+-----------------------
+-- Composite inserts --
+-----------------------
+
+-- | Insert a negation: mul (value -1))
+neg :: Monad m => Label -> G.NodeId -> AutoGradT m G.NodeId
 neg label a = do
   minusOne <- value "" (-1.0)
   mul label a minusOne
 
-sub :: Label -> G.NodeId -> G.NodeId -> State BPGraph G.NodeId
+-- | Insert a subtraction: add a (neg b)
+sub :: Monad m => Label -> G.NodeId -> G.NodeId -> AutoGradT m G.NodeId
 sub label a b = do
   negB <- neg "" b
   add label a negB
 
-tanh :: Label -> G.NodeId -> State BPGraph G.NodeId
-tanh label a = do
-  nid <- addNode (GraphNode TanhNode label 0.0 0.0)
-  addEdge a nid
-  pure nid
+-------------
+-- Getting --
+-------------
 
-sumNodes :: Label -> [G.NodeId] -> State BPGraph G.NodeId 
-sumNodes label inputs = do
-  nid <- addNode (GraphNode AddNode label 0.0 0.0)
-  mapM_ (flip addEdge nid) inputs
-  pure nid
+-- | Get the payload of a node
+getNodePayload :: Monad m => G.NodeId -> AutoGradT m Payload
+getNodePayload nid = gets (G.getNode nid)
 
-prodNodes :: Label -> [G.NodeId] -> State BPGraph G.NodeId 
-prodNodes label inputs = do
-  nid <- addNode (GraphNode MulNode label 0.0 0.0)
-  mapM_ (flip addEdge nid) inputs
-  pure nid
+-- | Get a node's operation
+getNodeOp :: Monad m => G.NodeId -> AutoGradT m NodeOp
+getNodeOp = fmap nodeType . getNodePayload
 
-----------------
--- Evaluation --
-----------------
+-- | Get a node's label
+getNodeLabel :: Monad m => G.NodeId -> AutoGradT m Label
+getNodeLabel = fmap nodeLabel . getNodePayload
 
-forward :: BPGraph -> BPGraph
-forward graph = execState (mapM_ go (G.terminal graph)) graph
+-- | Get a node's value
+getNodeVal :: Monad m => G.NodeId -> AutoGradT m Double
+getNodeVal = fmap nodeVal . getNodePayload
+
+-- | Get a node's gradient
+getNodeGrad :: Monad m => G.NodeId -> AutoGradT m Double
+getNodeGrad = fmap nodeGrad . getNodePayload
+
+-- | Get all nodes in the computational graph
+getNodes :: Monad m => AutoGradT m [G.NodeId]
+getNodes = gets (M.keys . G.nodes)
+
+-- | Get all parent nodes of a node in the computational graph
+getParentNodes :: Monad m => G.NodeId -> AutoGradT m [G.NodeId]
+getParentNodes nid = gets (G.parentNodes nid)
+
+-------------
+-- Setting --
+-------------
+
+-- | Set a node's payload
+setNodePayload :: Monad m => G.NodeId -> Payload -> AutoGradT m ()
+setNodePayload nid payload = modify (G.setNode nid payload)
+
+-- | Set a node's label
+setNodeLabel :: Monad m => G.NodeId -> Label -> AutoGradT m ()
+setNodeLabel nid label = do
+  payload <- getNodePayload nid
+  setNodePayload nid (payload { nodeLabel = label })
+
+-- | Set a node's value
+setNodeVal :: Monad m => G.NodeId -> Double -> AutoGradT m ()
+setNodeVal nid val = do
+  payload <- getNodePayload nid
+  setNodePayload nid (payload { nodeVal = val })
+
+-- | Set the values for a list of nodes
+setNodeVals :: Monad m => [(G.NodeId, Double)] -> AutoGradT m ()
+setNodeVals = mapM_ (uncurry setNodeVal)
+
+-- | Set a node's gradient
+setNodeGrad :: Monad m => G.NodeId -> Double -> AutoGradT m ()
+setNodeGrad nid grad = do
+  payload <- getNodePayload nid
+  setNodePayload nid (payload { nodeGrad = grad })
+
+-- | Set the gradients for a list of nodes
+setNodeGrads :: Monad m => [(G.NodeId, Double)] -> AutoGradT m ()
+setNodeGrads = mapM_ (uncurry setNodeGrad)
+
+-- | Set all gradients in the computational graph to zero
+zeroGrad :: Monad m => AutoGradT m ()
+zeroGrad = do
+  nodes <- getNodes
+  setNodeGrads (zip nodes (repeat 0.0))
+
+----------------------
+-- Graph operations --
+----------------------
+
+-- | Perform a forward pass in the computational graph
+forward :: Monad m => AutoGradT m ()
+forward = gets G.terminalNodes >>= mapM_ forwardNode
   where
-    go :: G.NodeId -> State BPGraph ()
-    go nid = do
-      GraphNode op label _ grad <- gets (G.getNode nid)
-      case op of
-        ValueNode -> pure ()
-        AddNode -> do
-          parents <- gets (G.parents nid)
-          vals <- forM parents $ \pid -> do
-            go pid
-            GraphNode _ _ val _ <- gets (G.getNode pid)
-            return val
-          let newNode = GraphNode op label (sum vals) grad
-          modify (G.setNode nid newNode)
-        MulNode -> do
-          parents <- gets (G.parents nid)
-          vals <- forM parents $ \pid -> do
-            go pid
-            GraphNode _ _ val _ <- gets (G.getNode pid)
-            return val
-          let newNode = GraphNode op label (product vals) grad
-          modify (G.setNode nid newNode)
-        TanhNode -> do
-          parents <- gets (G.parents nid)
-          case parents of
+    -- | Perform a forward pass on a single node
+    forwardNode :: Monad m => G.NodeId -> AutoGradT m ()
+    forwardNode nid = do
+      getNodeOp nid >>= \case
+        ValueOp -> pure ()
+        AddOp -> do
+          parents <- getParentNodes nid
+          mapM_ forwardNode parents
+          vals <- mapM getNodeVal parents
+          setNodeVal nid (P.sum vals)
+        MulOp -> do
+          parents <- getParentNodes nid
+          mapM_ forwardNode parents
+          vals <- mapM getNodeVal parents
+          setNodeVal nid (product vals)
+        TanhOp -> do
+          getParentNodes nid >>= \case
             [pid] -> do
-              go pid
-              GraphNode _ _ val _ <- gets (G.getNode pid)
-              let newNode = GraphNode op label (P.tanh val) grad
-              modify (G.setNode nid newNode)
+              forwardNode pid
+              val <- getNodeVal pid
+              setNodeVal nid (P.tanh val)
             x -> error $ "Tanh node has " <> show (length x) <> " parents"
 
 -- | Given a list, return a list of each element and all other elements of that
@@ -207,125 +340,39 @@ oneVsRest as = reverse . fst $ foldr go ([], as) as
     go _ (xs, []) = (xs, [])
     go _ (xs, y:ys) = ((y,ys) : xs, ys <> [y])
 
-backprop :: BPGraph -> BPGraph
-backprop graph = flip execState graph $ do
-  let terminalNodes = G.terminal graph
-  modify zeroGrad
-  mapM_ oneGrad terminalNodes
-  mapM_ go (G.terminal graph)
+-- | Perform a backpropagation pass starting from a particular node in the
+-- computational graph
+backprop :: Monad m => G.NodeId -> AutoGradT m ()
+backprop node = do
+  zeroGrad
+  setNodeGrad node 1.0
+  backpropNode node
   where
-    oneGrad :: G.NodeId -> State BPGraph ()
-    oneGrad nid = do
-      GraphNode op label val _ <- gets (G.getNode nid)
-      let newNode = GraphNode op label val 1.0
-      modify (G.setNode nid newNode)
-
-    go :: G.NodeId -> State BPGraph ()
-    go nid = do
-      GraphNode op _ _ grad <- gets (G.getNode nid)
-      case op of
-        ValueNode -> pure ()
-        AddNode -> do
-          parents <- gets (G.parents nid)
+    -- | Perform a backpropagation pass on a single node
+    backpropNode :: Monad m => G.NodeId -> AutoGradT m ()
+    backpropNode nid = do
+      grad <- getNodeGrad nid
+      getNodeOp nid >>= \case
+        ValueOp -> pure ()
+        AddOp -> do
+          parents <- getParentNodes nid
           forM_ parents $ \pid -> do
-            GraphNode pop plabel pval pgrad <- gets (G.getNode pid)
-            let newNode = GraphNode pop plabel pval (pgrad + grad)
-            modify (G.setNode pid newNode)
-            go pid
-        MulNode -> do
-          parents <- gets (G.parents nid)
-          parentVals <- forM parents $ \pid -> do
-            GraphNode _ _ val _ <- gets (G.getNode pid)
-            return val
+            pgrad <- getNodeGrad pid
+            setNodeGrad pid (pgrad + grad)
+            backpropNode pid
+        MulOp -> do
+          parents <- getParentNodes nid
+          parentVals <- mapM getNodeVal parents
           let rests = map snd (oneVsRest parentVals)
           forM_ (zip parents rests) $ \(pid, rest) -> do
-            GraphNode pop plabel pval pgrad <- gets (G.getNode pid)
-            let newNode = GraphNode pop plabel pval (pgrad + grad * product rest)
-            modify (G.setNode pid newNode)
-            go pid
-        TanhNode -> do
-          parents <- gets (G.parents nid)
-          case parents of
+            pgrad <- getNodeGrad pid
+            setNodeGrad pid (pgrad + grad * product rest)
+            backpropNode pid
+        TanhOp -> do
+          getParentNodes nid >>= \case
             [pid] -> do
-              GraphNode pop plabel pval pgrad <- gets (G.getNode pid)
-              let newGrad = pgrad + grad * (1 - P.tanh pval ** 2)
-                  newNode = GraphNode pop plabel pval newGrad
-              modify (G.setNode pid newNode)
-              go pid
+              pval <- getNodeVal pid
+              pgrad <- getNodeGrad pid
+              setNodeGrad pid (pgrad + grad * (1 - P.tanh pval ** 2))
+              backpropNode pid
             x -> error $ "Tanh node has " <> show (length x) <> " parents"
-
---------------
--- Plotting --
---------------
-
-type NodeMap = M.Map G.NodeId G.NodeId
-type TransformState = (PlotGraph, NodeMap, NodeMap)
-
-showNodeType :: NodeType -> String
-showNodeType ValueNode = error "ValueNode is not an operation"
-showNodeType AddNode = "+"
-showNodeType MulNode = "*"
-showNodeType TanhNode = "tanh"
-
--- | Convert a BPGraph to a PlotGraph which:
---   - Categorize nodes into data nodes and operation nodes
---   - Split intermediate nodes in BPGraph into an operation and a data node
-toPlotGraph :: BPGraph -> PlotGraph
-toPlotGraph bpGraph =
-  let (plotGraph, _, _) = execState createPlotGraph (G.empty, M.empty, M.empty)
-   in plotGraph
-  where
-    createPlotGraph :: State TransformState ()
-    createPlotGraph = addDataNodes >> addOpNodes >> addEdges
-
-    addDataNode :: G.NodeId -> GraphNode -> State TransformState ()
-    addDataNode nid (GraphNode _ label val grad) = do
-      (plotGraph, dataNodeMap, opNodeMap) <- get
-      let node = dataNode label val grad
-          (nid', plotGraph') = G.addNode node plotGraph
-          dataNodeMap' = M.insert nid nid' dataNodeMap
-      put (plotGraph', dataNodeMap', opNodeMap)
-
-    addDataNodes :: State TransformState ()
-    addDataNodes = mapM_ (uncurry addDataNode) (M.toList (G.nodes bpGraph))
-
-    addOpNode :: G.NodeId -> GraphNode -> State TransformState ()
-    addOpNode nid GraphNode{..} =
-      case nodeType of
-        ValueNode -> pure ()
-        _ -> do
-          (plotGraph, dataNodeMap, opNodeMap) <- get
-          let node = opNode (showNodeType nodeType)
-              (nid', plotGraph') = G.addNode node plotGraph
-              opNodeMap' = M.insert nid nid' opNodeMap
-          put (plotGraph', dataNodeMap, opNodeMap')
-
-    addOpNodes :: State TransformState ()
-    addOpNodes = mapM_ (uncurry addOpNode) (M.toList (G.nodes bpGraph))
-
-    -- Add edge that already existed in the back propagation graph
-    addPrevEdge :: G.NodeId -> G.NodeId -> State TransformState ()
-    addPrevEdge nid1 nid2 = do
-      (plotGraph, dataNodeMap, opNodeMap) <- get
-      let nid1' = fromJust $ M.lookup nid1 dataNodeMap
-          nid2' = fromJust $ M.lookup nid2 opNodeMap
-          plotGraph' = G.addEdge nid1' nid2' plotGraph
-      put (plotGraph', dataNodeMap, opNodeMap)
-
-    -- Add new edge to connect the op nodes to their respective data nodes 
-    addOpEdge :: G.NodeId -> G.NodeId -> State TransformState ()
-    addOpEdge oldOpNode newOpNode = do
-      (plotGraph, dataNodeMap, opNodeMap) <- get
-      let source = newOpNode
-          target = fromJust $ M.lookup oldOpNode dataNodeMap
-          plotGraph' = G.addEdge source target plotGraph
-      put (plotGraph', dataNodeMap, opNodeMap)
-
-    addEdges :: State TransformState ()
-    addEdges = do
-      mapM_ (uncurry addPrevEdge) (G.edges bpGraph)
-      (_, _, opNodeMap) <- get
-      mapM_ (uncurry addOpEdge) (M.toList opNodeMap)
-
-plotGraphSVG :: FilePath -> BPGraph -> IO FilePath
-plotGraphSVG fp = plotSVG fp . graphToDot . toPlotGraph

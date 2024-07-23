@@ -2,32 +2,37 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
 module Graph
-  -- Types
-  ( NodeId
+
+  -- * Types
+  ( NodeId(nodeIdToInt)
   , Graph (nodes, edges)
-  -- Constructors
+
+  -- * Constructors
   , empty
-  -- Node operations
-  , addNode
+
+  -- * Node operations
+  , insertNode
   , getNode
   , setNode
   , setNodes
-  , terminal
-  , parents
-  -- Edge operations
-  , addEdge
-  , getEdges
-  -- Convenience
-  , idToInt
+  , terminalNodes
+  , parentNodes
+
+  -- * Edge operations
+  , insertEdge
+
   ) where
 
 import qualified Data.Map as M
 
-newtype NodeId = NodeId Int
+-- | The unique identifier attached to each node in the graph
+newtype NodeId = NodeId { nodeIdToInt :: Int }
   deriving (Show, Eq, Ord)
 
 type Edge = (NodeId, NodeId)
 
+-- | The main graph type. Each node in the graph consists of an identifier
+-- (NodeId) and a payload (which the Graph type parameterizes over).
 data Graph a =
   Graph
     { nodes :: M.Map NodeId a
@@ -35,6 +40,11 @@ data Graph a =
     }
   deriving Eq
 
+-------------------
+-- Constructors -- 
+-------------------
+
+-- | Create an empty graph
 empty :: Graph a
 empty =
   Graph
@@ -46,11 +56,9 @@ empty =
 -- Node operations --
 ---------------------
 
-idToInt :: NodeId -> Int
-idToInt (NodeId x) = x
-
-addNode :: a -> Graph a -> (NodeId, Graph a)
-addNode node Graph{..} = (nid, graph)
+-- | Insert a node into the graph
+insertNode :: a -> Graph a -> (NodeId, Graph a)
+insertNode node Graph{..} = (nid, graph)
   where 
     nid = NodeId (length nodes)
     graph =
@@ -59,14 +67,18 @@ addNode node Graph{..} = (nid, graph)
         , edges = edges
         }
 
--- | Return the node associated with a NodeId
--- Although this is a partial function, it's safe because:
---   1. The user can only get a NodeId through addNode
+-- | Return the node associated with a NodeId. Note that although this is a
+-- partial function, it's safe because:
+--
+--   1. The user can only get a NodeId through insertNode
+--
 --   2. There's no way to update NodeIds in the graph API
+--
 --   3. There's no way to delete NodeIds in the graph API
 getNode :: NodeId -> Graph a -> a
-getNode nid Graph{..} = nodes M.! nid
+getNode nid graph = (nodes graph) M.! nid
 
+-- | Set the payload of a node in the graph
 setNode :: NodeId -> a -> Graph a -> Graph a
 setNode nid node Graph{..} =
   Graph
@@ -74,29 +86,27 @@ setNode nid node Graph{..} =
     , edges = edges
     }
 
+-- | Set the payloads for a list of nodes
 setNodes :: Graph a -> [(NodeId, a)]-> Graph a
 setNodes = foldr (uncurry setNode)
 
 -- | Return a list of terminal nodes (nodes with no outgoing edges)
-terminal :: Graph a -> [NodeId]
-terminal Graph{..} =
+terminalNodes :: Graph a -> [NodeId]
+terminalNodes Graph{..} =
   let targets = map fst edges
    in filter (`notElem` targets) (M.keys nodes)
 
-parents :: NodeId -> Graph a -> [NodeId]
-parents nid Graph{..} = map fst (filter ((== nid) . snd) edges)
+-- | Return a list of parent nodes (nodes with an edge to the given node)
+parentNodes :: NodeId -> Graph a -> [NodeId]
+parentNodes nid Graph{..} = map fst (filter ((== nid) . snd) edges)
 
 ---------------------
 -- Edge operations --
 ---------------------
 
-addEdge :: Eq a => NodeId -> NodeId -> Graph a -> Graph a 
-addEdge node1 node2 graph
+-- | Insert an edge into the graph. Self-edges are not allowed, and will not be
+-- added to the graph.
+insertEdge :: Eq a => NodeId -> NodeId -> Graph a -> Graph a 
+insertEdge node1 node2 graph
   | node1 == node2 = graph
   | otherwise = graph { edges = (node1, node2) : edges graph }
-
-getEdges :: NodeId -> Graph a -> ([Edge], [Edge])
-getEdges nid Graph{..} = (inEdges, outEdges)
-  where
-    inEdges = filter (\x -> snd x == nid) edges
-    outEdges = filter (\x -> fst x == nid) edges
