@@ -1,4 +1,5 @@
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE InstanceSigs #-}
 
 module Engine.Network
 
@@ -10,30 +11,23 @@ module Engine.Network
   , Layer(..)
   , Network(..)
 
+  -- * NNModule class
+  , NNModule(..)
+
   -- * Initializing the network
   , neuronInit
   , layerInit
   , networkInit
-  , getParamsNeuron
-  , getParamsLayer
-  , getParamsNetwork
 
   -- * Calling the network
   , neuronCall
   , layerCall
   , networkCall
 
-  -- * Loss functions
-  , mseLoss
-
-  -- * Training the network
-  , train
-
   ) where
 
-import Control.Monad (forM, replicateM, zipWithM, foldM)
+import Control.Monad (replicateM, zipWithM, foldM)
 import qualified Engine as E
-import qualified Graph as G
 
 -----------
 -- Types --
@@ -42,8 +36,8 @@ import qualified Graph as G
 -- | Parameters of a single neuron 
 data NeuronParams = 
   NeuronParams
-    { weights :: [G.NodeId]
-    , bias :: G.NodeId
+    { weights :: [E.Node]
+    , bias :: E.Node
     }
 
 -- | Parameters for every neuron in a layer
@@ -55,26 +49,47 @@ type NetworkParams = [LayerParams]
 -- | A single neuron
 data Neuron = 
   Neuron
-    { neuronInputs :: [G.NodeId] -- ^ The input nodes
-    , neuronParams :: NeuronParams -- ^ The parameters
-    , neuronOutput :: G.NodeId -- ^ The output node
+    { neuronInputs :: [E.Node] -- ^ The input nodes
+    , neuronParams :: NeuronParams -- ^ The parameters of the neuron
+    , neuronOutput :: E.Node -- ^ The output node
     }
 
 -- | A layer
 data Layer =
   Layer
-    { layerInputs :: [G.NodeId] -- ^ The input nodes (shared with each neuron)
-    , layerNeurons :: [Neuron] -- ^ The parameters
-    , layerOutputs :: [G.NodeId] -- ^ The output nodes (one for each neuron)
+    { layerInputs :: [E.Node] -- ^ The input nodes (shared with each neuron)
+    , layerNeurons :: [Neuron] -- ^ The neurons in the layer
+    , layerOutputs :: [E.Node] -- ^ The output nodes (one for each neuron)
     }
 
 -- | A Multi-Layer Perceptron neural network
 data Network =
   Network
-    { networkInputs :: [G.NodeId] -- ^ The input nodes
-    , networkLayers :: [Layer] -- ^ The parameters
-    , networkOutputs :: [G.NodeId] -- ^ The output nodes
+    { networkInputs :: [E.Node] -- ^ The input nodes
+    , networkLayers :: [Layer] -- ^ The layers in the network
+    , networkOutputs :: [E.Node] -- ^ The output nodes
     }
+
+------------------------
+-- The NNModule Class --
+------------------------
+
+class NNModule a where
+  getParams :: a -> [E.Node]
+
+instance NNModule Neuron where
+  getParams :: Neuron -> [E.Node]
+  getParams neuron =
+    let params = neuronParams neuron
+     in bias params : weights params
+
+instance NNModule Layer where
+  getParams :: Layer -> [E.Node]
+  getParams = concatMap getParams . layerNeurons
+
+instance NNModule Network where
+  getParams :: Network -> [E.Node]
+  getParams = concatMap getParams . networkLayers
     
 ------------------------------
 -- Initializing the network --
@@ -101,7 +116,7 @@ networkInit inputSize layerSizes =
 -------------------------
 
 -- | Create a neuron from it's inputs and parameters
-neuronCall :: Monad m => [G.NodeId] -> NeuronParams -> E.AutoGradT m Neuron
+neuronCall :: Monad m => [E.Node] -> NeuronParams -> E.AutoGradT m Neuron
 neuronCall inputs neuron = do
   wx <- zipWithM (E.mul "") (weights neuron) inputs
   activation <- E.sum "" (bias neuron : wx)
@@ -114,7 +129,7 @@ neuronCall inputs neuron = do
       }
 
 -- | Create a layer from it's inputs and parameters
-layerCall :: Monad m => [G.NodeId] -> LayerParams -> E.AutoGradT m Layer
+layerCall :: Monad m => [E.Node] -> LayerParams -> E.AutoGradT m Layer
 layerCall inputs layer = do
   neurons <- mapM (neuronCall inputs) layer
   pure $
@@ -125,7 +140,7 @@ layerCall inputs layer = do
       }
 
 -- | Create a network from it's inputs and parameters
-networkCall :: Monad m => [G.NodeId] -> NetworkParams -> E.AutoGradT m Network
+networkCall :: Monad m => [E.Node] -> NetworkParams -> E.AutoGradT m Network
 networkCall inputs network = do
   (outputs, layers) <- foldM makeLayer (inputs, []) network
   pure $
@@ -137,94 +152,9 @@ networkCall inputs network = do
   where
     makeLayer
       :: Monad m
-      => ([G.NodeId], [Layer])
+      => ([E.Node], [Layer])
       -> LayerParams
-      -> E.AutoGradT m ([G.NodeId], [Layer])
+      -> E.AutoGradT m ([E.Node], [Layer])
     makeLayer (layerInputs, prevLayers) params = do
       layer <- layerCall layerInputs params
       pure (layerOutputs layer, prevLayers <> [layer])
-
---------------------
--- Loss functions --
---------------------
-
--- | The Mean Squared Error (MSE) loss function, defined as:
---  \[
---      MSE = \frac{1}{n} \sum_{i=0}^N \sum_{j=0}^M (y_{true} - y_{pred})^2
---  \]
---  where
---
---      * \(N\) is the number of samples
---
---      * \(M\) is the number of labels
---
---      * \(y_{true}\) is the true label
---
---      * \(y_{pred}\) is the predicted label
-mseLoss
-  :: Monad m
-  => [[Double]] -- ^ The input samples
-  -> [[Double]] -- ^ The input labels
-  -> NetworkParams -- ^ The network parameters
-  -> E.AutoGradT m G.NodeId
-mseLoss xs ys networkParams = do
-  -- For each sample, make relevant input nodes and call the network on them
-  yPreds <- forM xs $ \x -> do
-    inputs <- mapM (E.value "") x
-    network <- networkCall inputs networkParams
-    pure (networkOutputs network)
-  -- Make an input node for each label
-  yTrues <- forM ys $ \y ->
-    mapM (E.value "") y
-  -- Add nodes to compute the loss
-  a <- forM (zip yTrues yPreds) $ \(yTrue, yPred) -> do
-    subs <- forM (zip yTrue yPred) $ \(yt, yp) -> do
-      E.sub "" yt yp
-    E.sum "" subs
-  b <- mapM (\x -> E.mul "" x x) a
-  E.sum "" b
-
---------------------------
--- Training the network --
---------------------------
-
--- | Get a list of parameter nodes for a neuron
-getParamsNeuron :: NeuronParams -> [G.NodeId]
-getParamsNeuron NeuronParams{..} = bias : weights
-
--- | Get a list of parameter nodes for a layer
-getParamsLayer :: LayerParams -> [G.NodeId]
-getParamsLayer = concatMap getParamsNeuron
-
--- | Get a list of parameter nodes for a network
-getParamsNetwork :: NetworkParams -> [G.NodeId]
-getParamsNetwork = concatMap getParamsLayer
-
--- | Increment the value of a node
-nudge :: Monad m => Double -> G.NodeId -> E.AutoGradT m ()
-nudge lr nid = do
-  payload <- E.getNodePayload nid
-  let nodeVal' = E.nodeVal payload - lr * E.nodeGrad payload
-  E.setNodeVal nid nodeVal'
-
--- | Train the network using the MSE loss function
-train
-  :: Monad m
-  => Double
-  -- ^ The learning rate
-  -> Int
-  -- ^ The number of epochs
-  -> [[Double]]
-  -- ^ The input samples
-  -> [[Double]]
-  -- ^ The input labels
-  -> NetworkParams
-  -- ^ The network parameters
-  -> E.AutoGradT m [Double]
-train lr epochs xs ys networkParams = do
-  loss <- mseLoss xs ys networkParams
-  replicateM epochs $ do
-    E.forward
-    E.backprop loss
-    mapM_ (nudge lr) (getParamsNetwork networkParams)
-    E.getNodeVal loss

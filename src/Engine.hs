@@ -4,7 +4,9 @@
 module Engine
 
   -- * Types
-  ( NodeOp(..)
+  ( Node
+  , Label
+  , NodeOp(..)
   , CGraph
   , Payload(..)
 
@@ -79,6 +81,9 @@ import qualified Graph as G
 -- Types --
 -----------
 
+-- | A node in the computational graph
+type Node = G.NodeId
+
 -- | A descriptor for each node in the computational graph
 type Label = String
 
@@ -151,7 +156,7 @@ execAutoGrad m = evalRand (execStateT m G.empty)
 ---------------
 
 -- | Insert a node into the computational graph
-insertNode :: Monad m => Payload -> AutoGradT m G.NodeId
+insertNode :: Monad m => Payload -> AutoGradT m Node
 insertNode payload = do
   graph <- get
   let (nid, graph') = G.insertNode payload graph
@@ -159,7 +164,7 @@ insertNode payload = do
   pure nid
 
 -- | Insert an edge between two existing nodes in the computational graph
-insertEdge :: Monad m => G.NodeId -> G.NodeId -> AutoGradT m ()
+insertEdge :: Monad m => Node -> Node -> AutoGradT m ()
 insertEdge nid1 nid2 = modify (G.insertEdge nid1 nid2)
 
 -----------------------
@@ -167,15 +172,15 @@ insertEdge nid1 nid2 = modify (G.insertEdge nid1 nid2)
 -----------------------
 
 -- | Insert a value node into the computational graph
-value :: Monad m => Label -> Double -> AutoGradT m G.NodeId
+value :: Monad m => Label -> Double -> AutoGradT m Node
 value label val = insertNode (Payload ValueOp label val 0.0)
 
 -- | Insert a random value between -1 and 1
-randomValue :: Monad m => AutoGradT m G.NodeId
+randomValue :: Monad m => AutoGradT m Node
 randomValue = getRandomR (-1.0, 1.0) >>= value ""
 
 -- | Insert a binary addition node into the computational graph
-add :: Monad m => Label -> G.NodeId -> G.NodeId -> AutoGradT m G.NodeId 
+add :: Monad m => Label -> Node -> Node -> AutoGradT m Node 
 add label a b = do
   nid <- insertNode (Payload AddOp label 0.0 0.0)
   insertEdge a nid
@@ -183,14 +188,14 @@ add label a b = do
   pure nid
 
 -- | Insert an addition node into the computational graph
-sum :: Monad m => Label -> [G.NodeId] -> AutoGradT m G.NodeId 
+sum :: Monad m => Label -> [Node] -> AutoGradT m Node 
 sum label inputs = do
   nid <- insertNode (Payload AddOp label 0.0 0.0)
   mapM_ (flip insertEdge nid) inputs
   pure nid
 
 -- | Insert a binary multiplication node into the computational graph
-mul :: Monad m => Label -> G.NodeId -> G.NodeId -> AutoGradT m G.NodeId
+mul :: Monad m => Label -> Node -> Node -> AutoGradT m Node
 mul label a b = do
   nid <- insertNode (Payload MulOp label 0.0 0.0)
   insertEdge a nid
@@ -198,14 +203,14 @@ mul label a b = do
   pure nid
 
 -- | Insert a multiplication node into the computational graph
-prod :: Monad m => Label -> [G.NodeId] -> AutoGradT m G.NodeId 
+prod :: Monad m => Label -> [Node] -> AutoGradT m Node 
 prod label inputs = do
   nid <- insertNode (Payload MulOp label 0.0 0.0)
   mapM_ (flip insertEdge nid) inputs
   pure nid
 
 -- | Insert a tanh node into the computational graph
-tanh :: Monad m => Label -> G.NodeId -> AutoGradT m G.NodeId
+tanh :: Monad m => Label -> Node -> AutoGradT m Node
 tanh label a = do
   nid <- insertNode (Payload TanhOp label 0.0 0.0)
   insertEdge a nid
@@ -216,13 +221,13 @@ tanh label a = do
 -----------------------
 
 -- | Insert a negation: mul (value -1))
-neg :: Monad m => Label -> G.NodeId -> AutoGradT m G.NodeId
+neg :: Monad m => Label -> Node -> AutoGradT m Node
 neg label a = do
   minusOne <- value "" (-1.0)
   mul label a minusOne
 
 -- | Insert a subtraction: add a (neg b)
-sub :: Monad m => Label -> G.NodeId -> G.NodeId -> AutoGradT m G.NodeId
+sub :: Monad m => Label -> Node -> Node -> AutoGradT m Node
 sub label a b = do
   negB <- neg "" b
   add label a negB
@@ -232,31 +237,31 @@ sub label a b = do
 -------------
 
 -- | Get the payload of a node
-getNodePayload :: Monad m => G.NodeId -> AutoGradT m Payload
+getNodePayload :: Monad m => Node -> AutoGradT m Payload
 getNodePayload nid = gets (G.getNode nid)
 
 -- | Get a node's operation
-getNodeOp :: Monad m => G.NodeId -> AutoGradT m NodeOp
+getNodeOp :: Monad m => Node -> AutoGradT m NodeOp
 getNodeOp = fmap nodeType . getNodePayload
 
 -- | Get a node's label
-getNodeLabel :: Monad m => G.NodeId -> AutoGradT m Label
+getNodeLabel :: Monad m => Node -> AutoGradT m Label
 getNodeLabel = fmap nodeLabel . getNodePayload
 
 -- | Get a node's value
-getNodeVal :: Monad m => G.NodeId -> AutoGradT m Double
+getNodeVal :: Monad m => Node -> AutoGradT m Double
 getNodeVal = fmap nodeVal . getNodePayload
 
 -- | Get a node's gradient
-getNodeGrad :: Monad m => G.NodeId -> AutoGradT m Double
+getNodeGrad :: Monad m => Node -> AutoGradT m Double
 getNodeGrad = fmap nodeGrad . getNodePayload
 
 -- | Get all nodes in the computational graph
-getNodes :: Monad m => AutoGradT m [G.NodeId]
+getNodes :: Monad m => AutoGradT m [Node]
 getNodes = gets (M.keys . G.nodes)
 
 -- | Get all parent nodes of a node in the computational graph
-getParentNodes :: Monad m => G.NodeId -> AutoGradT m [G.NodeId]
+getParentNodes :: Monad m => Node -> AutoGradT m [Node]
 getParentNodes nid = gets (G.parentNodes nid)
 
 -------------
@@ -264,33 +269,33 @@ getParentNodes nid = gets (G.parentNodes nid)
 -------------
 
 -- | Set a node's payload
-setNodePayload :: Monad m => G.NodeId -> Payload -> AutoGradT m ()
+setNodePayload :: Monad m => Node -> Payload -> AutoGradT m ()
 setNodePayload nid payload = modify (G.setNode nid payload)
 
 -- | Set a node's label
-setNodeLabel :: Monad m => G.NodeId -> Label -> AutoGradT m ()
+setNodeLabel :: Monad m => Node -> Label -> AutoGradT m ()
 setNodeLabel nid label = do
   payload <- getNodePayload nid
   setNodePayload nid (payload { nodeLabel = label })
 
 -- | Set a node's value
-setNodeVal :: Monad m => G.NodeId -> Double -> AutoGradT m ()
+setNodeVal :: Monad m => Node -> Double -> AutoGradT m ()
 setNodeVal nid val = do
   payload <- getNodePayload nid
   setNodePayload nid (payload { nodeVal = val })
 
 -- | Set the values for a list of nodes
-setNodeVals :: Monad m => [(G.NodeId, Double)] -> AutoGradT m ()
+setNodeVals :: Monad m => [(Node, Double)] -> AutoGradT m ()
 setNodeVals = mapM_ (uncurry setNodeVal)
 
 -- | Set a node's gradient
-setNodeGrad :: Monad m => G.NodeId -> Double -> AutoGradT m ()
+setNodeGrad :: Monad m => Node -> Double -> AutoGradT m ()
 setNodeGrad nid grad = do
   payload <- getNodePayload nid
   setNodePayload nid (payload { nodeGrad = grad })
 
 -- | Set the gradients for a list of nodes
-setNodeGrads :: Monad m => [(G.NodeId, Double)] -> AutoGradT m ()
+setNodeGrads :: Monad m => [(Node, Double)] -> AutoGradT m ()
 setNodeGrads = mapM_ (uncurry setNodeGrad)
 
 -- | Set all gradients in the computational graph to zero
@@ -308,7 +313,7 @@ forward :: Monad m => AutoGradT m ()
 forward = gets G.terminalNodes >>= mapM_ forwardNode
   where
     -- | Perform a forward pass on a single node
-    forwardNode :: Monad m => G.NodeId -> AutoGradT m ()
+    forwardNode :: Monad m => Node -> AutoGradT m ()
     forwardNode nid = do
       getNodeOp nid >>= \case
         ValueOp -> pure ()
@@ -342,14 +347,14 @@ oneVsRest as = reverse . fst $ foldr go ([], as) as
 
 -- | Perform a backpropagation pass starting from a particular node in the
 -- computational graph
-backprop :: Monad m => G.NodeId -> AutoGradT m ()
+backprop :: Monad m => Node -> AutoGradT m ()
 backprop node = do
   zeroGrad
   setNodeGrad node 1.0
   backpropNode node
   where
     -- | Perform a backpropagation pass on a single node
-    backpropNode :: Monad m => G.NodeId -> AutoGradT m ()
+    backpropNode :: Monad m => Node -> AutoGradT m ()
     backpropNode nid = do
       grad <- getNodeGrad nid
       getNodeOp nid >>= \case

@@ -71,6 +71,7 @@ library
     exposed-modules:
         Engine
       , Engine.Network
+      , Engine.Network.Train
       , Engine.Visualize
       , Graph
 
@@ -118,6 +119,7 @@ executable hgrad
       , Chart
       , Chart-diagrams
       , MonadRandom
+      , transformers
 
     -- Directories containing source files.
     hs-source-dirs:

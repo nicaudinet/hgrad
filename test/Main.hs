@@ -10,6 +10,7 @@ import qualified Test.Tasty.QuickCheck as QC
 
 import qualified Engine as E
 import qualified Engine.Network as N
+import qualified Engine.Network.Train as N
 import qualified Graph as G
 
 type AutoGradTest = E.AutoGradT IO ()
@@ -136,7 +137,7 @@ testsNeuron = testGroup "Neuron unit Tests"
       i2 <- E.value "i2" 2.0
       params <- N.neuronInit 2
       neuron <- N.neuronOutput <$> N.neuronCall [i1, i2] params
-      E.setNodeVals (zip (N.getParamsNeuron params) (repeat 1))
+      E.setNodeVals (zip (N.getNeuronParams params) (repeat 1))
       E.forward
       E.backprop neuron
       let nval = tanh 4.0
