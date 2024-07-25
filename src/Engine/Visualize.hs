@@ -66,6 +66,7 @@ opNode payload = OpNode $
     E.ValueOp -> error "ValueOp is not an operation"
     E.AddOp -> "+"
     E.MulOp -> "*"
+    E.ReLUOp -> "ReLU"
     E.TanhOp -> "tanh"
 
 -- | Convert a CGraph to a PlotGraph which:

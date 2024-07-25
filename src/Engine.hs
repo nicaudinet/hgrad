@@ -36,6 +36,7 @@ module Engine
   , sum
   , mul
   , prod
+  , relu
   , tanh
 
   -- *** Composite inserts
@@ -92,6 +93,7 @@ data NodeOp
   = ValueOp
   | AddOp
   | MulOp
+  | ReLUOp
   | TanhOp
   deriving (Eq)
 
@@ -207,6 +209,13 @@ prod :: Monad m => Label -> [Node] -> AutoGradT m Node
 prod label inputs = do
   nid <- insertNode (Payload MulOp label 0.0 0.0)
   mapM_ (flip insertEdge nid) inputs
+  pure nid
+
+-- | Insert a ReLU node into the computational graph
+relu :: Monad m => Label -> Node -> AutoGradT m Node
+relu label a = do
+  nid <- insertNode (Payload ReLUOp label 0.0 0.0)
+  insertEdge a nid
   pure nid
 
 -- | Insert a tanh node into the computational graph
@@ -327,6 +336,13 @@ forward = gets G.terminalNodes >>= mapM_ forwardNode
           mapM_ forwardNode parents
           vals <- mapM getNodeVal parents
           setNodeVal nid (product vals)
+        ReLUOp -> do
+          getParentNodes nid >>= \case
+            [pid] -> do
+              forwardNode pid
+              val <- getNodeVal pid
+              setNodeVal nid (max val 0)
+            x -> error $ "ReLU node has " <> show (length x) <> " parents"
         TanhOp -> do
           getParentNodes nid >>= \case
             [pid] -> do
@@ -373,6 +389,14 @@ backprop node = do
             pgrad <- getNodeGrad pid
             setNodeGrad pid (pgrad + grad * product rest)
             backpropNode pid
+        ReLUOp -> do
+          getParentNodes nid >>= \case
+            [pid] -> do
+              pval <- getNodeVal pid
+              pgrad <- getNodeGrad pid
+              setNodeGrad pid (pgrad + grad * (if pval > 0 then 1 else 0))
+              backpropNode pid
+            x -> error $ "ReLU node has " <> show (length x) <> " parents"
         TanhOp -> do
           getParentNodes nid >>= \case
             [pid] -> do
