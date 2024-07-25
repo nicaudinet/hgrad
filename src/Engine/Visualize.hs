@@ -65,6 +65,7 @@ opNode payload = OpNode $
   case E.nodeType payload of
     E.ValueOp -> error "ValueOp is not an operation"
     E.AddOp -> "+"
+    E.ShiftOp c -> "+ " <> printf "%.03f" c
     E.MulOp -> "*"
     E.ReLUOp -> "ReLU"
     E.TanhOp -> "tanh"

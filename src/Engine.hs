@@ -33,6 +33,7 @@ module Engine
   , value
   , randomValue
   , add
+  , shift
   , sum
   , mul
   , prod
@@ -92,6 +93,7 @@ type Label = String
 data NodeOp
   = ValueOp
   | AddOp
+  | ShiftOp Double
   | MulOp
   | ReLUOp
   | TanhOp
@@ -187,6 +189,14 @@ add label a b = do
   nid <- insertNode (Payload AddOp label 0.0 0.0)
   insertEdge a nid
   insertEdge b nid
+  pure nid
+
+-- | Insert a shift node into the computational graph. Shift nodes take a single
+-- input and add a constant value to it
+shift :: Monad m => Label -> Double -> Node -> AutoGradT m Node 
+shift label c a = do
+  nid <- insertNode (Payload (ShiftOp c) label 0.0 0.0)
+  insertEdge a nid
   pure nid
 
 -- | Insert an addition node into the computational graph
@@ -331,6 +341,13 @@ forward = gets G.terminalNodes >>= mapM_ forwardNode
           mapM_ forwardNode parents
           vals <- mapM getNodeVal parents
           setNodeVal nid (P.sum vals)
+        ShiftOp c -> do
+          getParentNodes nid >>= \case
+            [pid] -> do
+              forwardNode pid
+              val <- getNodeVal pid
+              setNodeVal nid (val + c)
+            x -> error $ "ShiftOp node has " <> show (length x) <> " parents"
         MulOp -> do
           parents <- getParentNodes nid
           mapM_ forwardNode parents
@@ -381,6 +398,13 @@ backprop node = do
             pgrad <- getNodeGrad pid
             setNodeGrad pid (pgrad + grad)
             backpropNode pid
+        ShiftOp _ -> do
+          getParentNodes nid >>= \case
+            [pid] -> do
+              pgrad <- getNodeGrad pid
+              setNodeGrad pid (pgrad + grad)
+              backpropNode pid
+            x -> error $ "ShiftOp node has " <> show (length x) <> " parents"
         MulOp -> do
           parents <- getParentNodes nid
           parentVals <- mapM getNodeVal parents
