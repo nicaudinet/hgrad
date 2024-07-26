@@ -1,5 +1,8 @@
 {-# LANGUAGE RecordWildCards #-}
 
+-- | Module for visualizing the computational graph using GraphViz. Requires
+-- `dot` to be installed on the system
+
 module Engine.Visualize
   ( plotGraphSVG
   ) where

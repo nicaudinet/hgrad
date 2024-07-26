@@ -1,6 +1,8 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
+-- | A simple graph implementation for use as a computational graph
+
 module Graph
 
   -- * Types
@@ -32,6 +34,7 @@ import qualified Data.Map as M
 newtype NodeId = NodeId { nodeIdToInt :: Int }
   deriving (Show, Eq, Ord)
 
+-- | An edge in the graph (from, to)
 type Edge = (NodeId, NodeId)
 
 -- | The main graph type. Each node in the graph consists of an identifier

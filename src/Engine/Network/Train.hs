@@ -1,5 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 
+-- | Module for defining loss functions and training them
+
 module Engine.Network.Train
   
   -- * Loss functions
@@ -22,13 +24,15 @@ import Control.Monad (forM, replicateM)
 import qualified Engine as E
 import qualified Engine.Network as N
 
-
+-- | Get the parameter nodes of a neuron as a list
 getNeuronParams :: N.NeuronParams -> [E.Node]
 getNeuronParams N.NeuronParams{..} = bias : weights
 
+-- | Get the parameter nodes of a layer as a list
 getLayerParams :: N.LayerParams -> [E.Node]
 getLayerParams = concatMap getNeuronParams
 
+-- | Get the parameter nodes of a network as a list
 getNetworkParams :: N.NetworkParams -> [E.Node]
 getNetworkParams = concatMap getLayerParams
 
@@ -36,10 +40,14 @@ getNetworkParams = concatMap getLayerParams
 -- Loss functions --
 --------------------
 
+-- | A loss function with a single output node in the computational graph
 data Loss =
   Loss
     { lossOut :: E.Node
+    -- ^ The output node of the loss function
     , lossParams :: [E.Node]
+    -- ^ The parameters of the loss function to tweak (e.g. the weights and
+    -- biases of a neural network)
     }
 
 -- | The Mean Squared Error (MSE) loss function, defined as:

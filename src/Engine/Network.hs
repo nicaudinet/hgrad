@@ -1,6 +1,8 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE InstanceSigs #-}
 
+-- | Module for defining a simple Multi-Layer Perceptron network
+
 module Engine.Network
 
   -- * Types
@@ -10,9 +12,6 @@ module Engine.Network
   , Neuron(..)
   , Layer(..)
   , Network(..)
-
-  -- * NNModule class
-  , NNModule(..)
 
   -- * Initializing the network
   , neuronInit
@@ -70,27 +69,6 @@ data Network =
     , networkOutputs :: [E.Node] -- ^ The output nodes
     }
 
-------------------------
--- The NNModule Class --
-------------------------
-
-class NNModule a where
-  getParams :: a -> [E.Node]
-
-instance NNModule Neuron where
-  getParams :: Neuron -> [E.Node]
-  getParams neuron =
-    let params = neuronParams neuron
-     in bias params : weights params
-
-instance NNModule Layer where
-  getParams :: Layer -> [E.Node]
-  getParams = concatMap getParams . layerNeurons
-
-instance NNModule Network where
-  getParams :: Network -> [E.Node]
-  getParams = concatMap getParams . networkLayers
-    
 ------------------------------
 -- Initializing the network --
 ------------------------------

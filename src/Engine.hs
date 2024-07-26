@@ -1,6 +1,8 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE LambdaCase #-}
 
+-- | A module for constructing and executing actions over a computational graph
+
 module Engine
 
   -- * Types
@@ -134,12 +136,15 @@ type CGraph = G.Graph Payload
 --   * A random monad for generating random weights and biases
 type AutoGradT m a = StateT CGraph (RandT StdGen m) a
 
+-- | Run an AutoGradT action, returning the result and the computational graph
 runAutoGradT :: Monad m => AutoGradT m a -> StdGen -> m (a, CGraph)
 runAutoGradT ma = evalRandT (runStateT ma G.empty)
 
+-- | Evaluate an AutoGradT action, returning the result
 evalAutoGradT :: Monad m => AutoGradT m a -> StdGen -> m a
 evalAutoGradT ma = evalRandT (evalStateT ma G.empty)
 
+-- | Execute an AutoGradT action, returning the computational graph
 execAutoGradT :: Monad m => AutoGradT m a -> StdGen -> m CGraph
 execAutoGradT ma = evalRandT (execStateT ma G.empty)
 
@@ -147,23 +152,36 @@ execAutoGradT ma = evalRandT (execStateT ma G.empty)
 -- AutoGrad --
 --------------
 
+-- | The AutoGrad monad for constructing and executing pure actions over the
+-- computational graph
 type AutoGrad a = AutoGradT Identity a
 
+-- | Run an AutoGrad action, returning the result and the computational graph
 runAutoGrad :: AutoGrad a -> StdGen -> (a, CGraph)
 runAutoGrad m = evalRand (runStateT m G.empty)
 
+-- | Run an AutoGrad action, returning the result and the computational graph.
+-- Also samples a StdGen from the IO monad 
 runAutoGradIO :: AutoGrad a -> IO (a, CGraph)
 runAutoGradIO m = runAutoGrad m <$> getStdGen
 
+-- | Evaluate an AutoGrad action, returning the result
 evalAutoGrad :: AutoGrad a -> StdGen -> a
 evalAutoGrad m = evalRand (evalStateT m G.empty)
 
+-- | Execute an AutoGrad action, returning the computational graph
 execAutoGrad :: AutoGrad a -> StdGen -> CGraph
 execAutoGrad m = evalRand (execStateT m G.empty)
 
 ------------------------------------------
 -- Manipulating the computational graph --
 ------------------------------------------
+
+-- | By construction, the computational graph can only ever be added to. One can
+-- only ever insert new nodes and edges, but never remove them. This ensures
+-- that if you have a NodeId, the node is guaranteed to still be in the graph.
+-- One can, however, modify the payload of existing nodes (e.g. in a backprop
+-- step)
 
 ---------------
 -- Inserting --
