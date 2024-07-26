@@ -36,6 +36,7 @@ module Engine
   , shift
   , sum
   , mul
+  , scale
   , prod
   , relu
   , tanh
@@ -95,6 +96,7 @@ data NodeOp
   | AddOp
   | ShiftOp Double
   | MulOp
+  | ScaleOp Double
   | ReLUOp
   | TanhOp
   deriving (Eq)
@@ -212,6 +214,14 @@ mul label a b = do
   nid <- insertNode (Payload MulOp label 0.0 0.0)
   insertEdge a nid
   insertEdge b nid
+  pure nid
+
+-- | Insert a scale node into the computational graph. Scale nodes take a single
+-- input and multiply it by a constant value
+scale :: Monad m => Label -> Double -> Node -> AutoGradT m Node
+scale label c a = do
+  nid <- insertNode (Payload (ScaleOp c) label 0.0 0.0)
+  insertEdge a nid
   pure nid
 
 -- | Insert a multiplication node into the computational graph
@@ -353,6 +363,13 @@ forward = gets G.terminalNodes >>= mapM_ forwardNode
           mapM_ forwardNode parents
           vals <- mapM getNodeVal parents
           setNodeVal nid (product vals)
+        ScaleOp c -> do
+          getParentNodes nid >>= \case
+            [pid] -> do
+              forwardNode pid
+              val <- getNodeVal pid
+              setNodeVal nid (val * c)
+            x -> error $ "ScaleOp node has " <> show (length x) <> " parents"
         ReLUOp -> do
           getParentNodes nid >>= \case
             [pid] -> do
@@ -413,6 +430,13 @@ backprop node = do
             pgrad <- getNodeGrad pid
             setNodeGrad pid (pgrad + grad * product rest)
             backpropNode pid
+        ScaleOp c -> do
+          getParentNodes nid >>= \case
+            [pid] -> do
+              pgrad <- getNodeGrad pid
+              setNodeGrad pid (pgrad + grad * c)
+              backpropNode pid
+            x -> error $ "ScaleOp node has " <> show (length x) <> " parents"
         ReLUOp -> do
           getParentNodes nid >>= \case
             [pid] -> do
