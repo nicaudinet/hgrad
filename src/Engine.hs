@@ -38,6 +38,9 @@ module Engine
   , mul
   , scale
   , prod
+  , pow
+  , recip
+  , div
   , relu
   , tanh
 
@@ -71,7 +74,7 @@ module Engine
 where
 
 import qualified Prelude as P (sum, tanh)
-import Prelude hiding (sum, tanh)
+import Prelude hiding (sum, tanh, recip, div)
 
 import Control.Monad.Random
 import Control.Monad.Trans.State
@@ -97,6 +100,7 @@ data NodeOp
   | ShiftOp Double
   | MulOp
   | ScaleOp Double
+  | PowOp Double
   | ReLUOp
   | TanhOp
   deriving (Eq)
@@ -231,6 +235,14 @@ prod label inputs = do
   mapM_ (flip insertEdge nid) inputs
   pure nid
 
+-- | Insert a power node into the computational graph. Power nodes take a single
+-- input and raise it to the power of a constant exponent
+pow :: Monad m => Label -> Double -> Node -> AutoGradT m Node
+pow label e a = do
+  nid <- insertNode (Payload (PowOp e) label 0.0 0.0)
+  insertEdge a nid
+  pure nid
+
 -- | Insert a ReLU node into the computational graph
 relu :: Monad m => Label -> Node -> AutoGradT m Node
 relu label a = do
@@ -260,6 +272,16 @@ sub :: Monad m => Label -> Node -> Node -> AutoGradT m Node
 sub label a b = do
   negB <- neg "" b
   add label a negB
+
+-- | Insert a reciprocal: pow (-1)
+recip :: Monad m => Label -> Node -> AutoGradT m Node
+recip label = pow label (-1.0)
+
+-- | Insert a division: mul a (recip b)
+div :: Monad m => Label -> Node -> Node -> AutoGradT m Node
+div label a b = do
+  recipB <- recip "" b
+  mul label a recipB
 
 -------------
 -- Getting --
@@ -370,6 +392,13 @@ forward = gets G.terminalNodes >>= mapM_ forwardNode
               val <- getNodeVal pid
               setNodeVal nid (val * c)
             x -> error $ "ScaleOp node has " <> show (length x) <> " parents"
+        PowOp e -> do
+          getParentNodes nid >>= \case
+            [pid] -> do
+              forwardNode pid
+              val <- getNodeVal pid
+              setNodeVal nid (val ** e)
+            x -> error $ "PowOp node has " <> show (length x) <> " parents"
         ReLUOp -> do
           getParentNodes nid >>= \case
             [pid] -> do
@@ -433,6 +462,13 @@ backprop node = do
             [pid] -> do
               pgrad <- getNodeGrad pid
               setNodeGrad pid (pgrad + grad * c)
+            x -> error $ "ScaleOp node has " <> show (length x) <> " parents"
+        PowOp e -> do
+          getParentNodes nid >>= \case
+            [pid] -> do
+              pval <- getNodeVal pid
+              pgrad <- getNodeGrad pid
+              setNodeGrad pid (pgrad + grad * e * (pval ** (e - 1)))
             x -> error $ "ScaleOp node has " <> show (length x) <> " parents"
         ReLUOp -> do
           getParentNodes nid >>= \case

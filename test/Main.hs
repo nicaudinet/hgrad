@@ -1,10 +1,9 @@
-{-# OPTIONS_GHC -fno-warn-orphans #-}
-
 module Main (main) where
 
 import Control.Monad.Random (getStdGen)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.State
+import Data.List (intercalate)
 import Test.Tasty
 import Test.Tasty.HUnit
 import qualified Test.Tasty.QuickCheck as QC
@@ -39,11 +38,35 @@ assertVal nid a = do
   bVal <- E.getNodeVal nid
   liftIO $ assertEqual ("value of " <> bLabel) a bVal
 
+assertValApprox :: G.NodeId -> Double -> AutoGradTest
+assertValApprox nid a = do
+  bLabel <- E.getNodeLabel nid
+  bVal <- E.getNodeVal nid
+  let cond = abs (bVal - a) < 1e-6
+  let failMsg = intercalate " "
+        [ "value of", bLabel
+        , "should be approximately", show a
+        , "but is", show bVal
+        ]
+  liftIO $ assertBool failMsg cond
+
 assertGrad :: G.NodeId -> Double -> AutoGradTest
 assertGrad nid a = do
   bLabel <- E.getNodeLabel nid
   bGrad <- E.getNodeGrad nid
   liftIO $ assertEqual ("grad of " <> bLabel) a bGrad
+
+assertGradApprox :: G.NodeId -> Double -> AutoGradTest
+assertGradApprox nid a = do
+  bLabel <- E.getNodeLabel nid
+  bGrad <- E.getNodeGrad nid
+  let cond = abs (bGrad - a) < 1e-6
+  let failMsg = intercalate " "
+        [ "grad of", bLabel
+        , "should be approximately", show a
+        , "but is", show bGrad
+        ]
+  liftIO $ assertBool failMsg cond
 
 main :: IO ()
 main = defaultMain tests
@@ -125,6 +148,7 @@ testsBackprop = testGroup "Backprop Unit Tests"
   , testCase "sum: e = a + b + c + d" testSum
   , testCase "prod: e = a * b * c * d" testProd
   , testCase "micrograd: test_sanity_check" testSanityCheck
+  , testCase "micrograd: test_more_ops" testMoreOps
   ]
   where
     testAddNodeTwice = runAutoGradTest $ do
@@ -175,7 +199,9 @@ testsBackprop = testGroup "Backprop Unit Tests"
       assertGrad c  8.0
       assertGrad d  6.0
 
-    -- From https://github.com/karpathy/micrograd/blob/master/test/test_engine.py
+    -- Original test from https://github.com/karpathy/micrograd/blob/master/test/test_engine.py
+    -- The magic numbers here correspond to what PyTorch produced. They can be
+    -- reproduced by running test_py/test_sanity_check.py
     testSanityCheck = runAutoGradTest $ do
       x <- E.value "x" (-4.0)
       z1 <- E.scale "" 2 x
@@ -198,6 +224,41 @@ testsBackprop = testGroup "Backprop Unit Tests"
       assertGrad q (-3.0)
       assertGrad z (-8.0)
       assertGrad x 46.0
+
+    -- Original test from https://github.com/karpathy/micrograd/blob/master/test/test_engine.py
+    -- The magic numbers here correspond to what PyTorch produced. They can be
+    -- reproduced by running test_py/test_more_ops.py
+    testMoreOps = runAutoGradTest $ do
+      a <- E.value "" (-4.0)
+      b <- E.value "" 2.0
+      c <- E.add "" a b
+      d1 <- E.mul "" a b
+      d2 <- E.pow "" 3 b
+      d <- E.add "" d1 d2
+      c <- E.add "" c c
+      c <- E.shift "" 1 c
+      c <- E.add "" c c
+      c <- E.shift "" 1 c
+      c <- E.sub "" c a
+      d1 <- E.scale "" 2 d
+      d2 <- E.add "" b a
+      d2 <- E.relu "" d2
+      d <- E.sum "" [d, d1, d2]
+      d1 <- E.scale "" 3 d
+      d2 <- E.sub "" b a
+      d2 <- E.relu "" d2
+      d <- E.sum "" [d, d1, d2]
+      e <- E.sub "" c d
+      f <- E.pow "" 2 e
+      g <- E.scale "" (1 / 2.0) f
+      g1 <- E.recip "" f
+      g1 <- E.scale "" 10 g1
+      g <- E.add "" g g1
+      E.forward
+      E.backprop g
+      assertValApprox g 24.70408163265306
+      assertGradApprox a 138.83381924198252
+      assertGradApprox b 645.5772594752186
 
 -----------------------
 -- Neuron unit tests --

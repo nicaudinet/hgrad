@@ -3,3 +3,4 @@ dist-newstyle
 *.svg
 *.dot
 micrograd
+test_py/.venv

@@ -68,6 +68,7 @@ opNode payload = OpNode $
     E.ShiftOp c -> "+ " <> printf "%.03f" c
     E.MulOp -> "*"
     E.ScaleOp c -> "* " <> printf "%.03f" c
+    E.PowOp e -> "^ " <> printf "%.03f" e
     E.ReLUOp -> "ReLU"
     E.TanhOp -> "tanh"
 
