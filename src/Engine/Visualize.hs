@@ -7,6 +7,7 @@ module Engine.Visualize
 import Control.Monad.Trans.State
 import Data.List (intercalate) 
 import qualified Data.Map as M
+import Data.Maybe (fromMaybe)
 import System.Process (callProcess)
 import Text.Printf (printf)
 
@@ -55,7 +56,7 @@ type PlotM = State PlotState
 dataNode :: E.Payload -> PlotNode
 dataNode payload =
   DataNode
-    { dataNodeLabel = E.nodeLabel payload
+    { dataNodeLabel = fromMaybe "" (E.nodeLabel payload)
     , dataNodeVal = printf "%.04f" (E.nodeVal payload)
     , dataNodeGrad = printf "%.04f" (E.nodeGrad payload)
     }

@@ -29,7 +29,11 @@ module Engine
   -- | All nodes are initialised with a gradient of 0.0. All non-value nodes are
   -- also initialized with a value of 0.0.
 
-  -- *** Primitive inserts
+  , withLabel
+
+  -- *** Primitive operation inserts
+  -- | These operations are directly supported by the computational graph (are a
+  -- single node)
   , value
   , randomValue
   , add
@@ -39,14 +43,14 @@ module Engine
   , scale
   , prod
   , pow
-  , recip
-  , div
   , relu
   , tanh
 
-  -- *** Composite inserts
+  -- *** Composite operation inserts
   , neg
   , sub
+  , recip
+  , div
 
   -- ** Getting
   , getNodePayload
@@ -109,7 +113,7 @@ data NodeOp
 data Payload =
   Payload
     { nodeType :: NodeOp
-    , nodeLabel :: Label
+    , nodeLabel :: Maybe Label
     , nodeVal :: Double
     , nodeGrad :: Double
     }
@@ -177,83 +181,94 @@ insertNode payload = do
 insertEdge :: Monad m => Node -> Node -> AutoGradT m ()
 insertEdge nid1 nid2 = modify (G.insertEdge nid1 nid2)
 
+-- | Add a label to a node
+withLabel :: Monad m => Label -> AutoGradT m Node -> AutoGradT m Node
+withLabel label action = do
+  nid <- action
+  setNodeLabel nid label
+  pure nid
+
+-- | Insert a node with no label, zero value and zero gradient
+insertZeroNode :: Monad m => NodeOp -> AutoGradT m Node
+insertZeroNode op = insertNode (Payload op Nothing 0.0 0.0)
+
 -----------------------
 -- Primitive inserts --
 -----------------------
 
 -- | Insert a value node into the computational graph
-value :: Monad m => Label -> Double -> AutoGradT m Node
-value label val = insertNode (Payload ValueOp label val 0.0)
+value :: Monad m => Double -> AutoGradT m Node
+value val = insertNode (Payload ValueOp Nothing val 0.0)
 
 -- | Insert a random value between -1 and 1
 randomValue :: Monad m => AutoGradT m Node
-randomValue = getRandomR (-1.0, 1.0) >>= value ""
+randomValue = getRandomR (-1.0, 1.0) >>= value
 
 -- | Insert a binary addition node into the computational graph
-add :: Monad m => Label -> Node -> Node -> AutoGradT m Node 
-add label a b = do
-  nid <- insertNode (Payload AddOp label 0.0 0.0)
+add :: Monad m => Node -> Node -> AutoGradT m Node 
+add a b = do
+  nid <- insertZeroNode AddOp
   insertEdge a nid
   insertEdge b nid
   pure nid
 
 -- | Insert a shift node into the computational graph. Shift nodes take a single
 -- input and add a constant value to it
-shift :: Monad m => Label -> Double -> Node -> AutoGradT m Node 
-shift label c a = do
-  nid <- insertNode (Payload (ShiftOp c) label 0.0 0.0)
+shift :: Monad m => Double -> Node -> AutoGradT m Node 
+shift c a = do
+  nid <- insertZeroNode (ShiftOp c)
   insertEdge a nid
   pure nid
 
 -- | Insert an addition node into the computational graph
-sum :: Monad m => Label -> [Node] -> AutoGradT m Node 
-sum label inputs = do
-  nid <- insertNode (Payload AddOp label 0.0 0.0)
+sum :: Monad m => [Node] -> AutoGradT m Node 
+sum inputs = do
+  nid <- insertZeroNode AddOp
   mapM_ (flip insertEdge nid) inputs
   pure nid
 
 -- | Insert a binary multiplication node into the computational graph
-mul :: Monad m => Label -> Node -> Node -> AutoGradT m Node
-mul label a b = do
-  nid <- insertNode (Payload MulOp label 0.0 0.0)
+mul :: Monad m => Node -> Node -> AutoGradT m Node
+mul a b = do
+  nid <- insertZeroNode MulOp
   insertEdge a nid
   insertEdge b nid
   pure nid
 
 -- | Insert a scale node into the computational graph. Scale nodes take a single
 -- input and multiply it by a constant value
-scale :: Monad m => Label -> Double -> Node -> AutoGradT m Node
-scale label c a = do
-  nid <- insertNode (Payload (ScaleOp c) label 0.0 0.0)
+scale :: Monad m => Double -> Node -> AutoGradT m Node
+scale c a = do
+  nid <- insertZeroNode (ScaleOp c)
   insertEdge a nid
   pure nid
 
 -- | Insert a multiplication node into the computational graph
-prod :: Monad m => Label -> [Node] -> AutoGradT m Node 
-prod label inputs = do
-  nid <- insertNode (Payload MulOp label 0.0 0.0)
+prod :: Monad m => [Node] -> AutoGradT m Node 
+prod inputs = do
+  nid <- insertZeroNode MulOp
   mapM_ (flip insertEdge nid) inputs
   pure nid
 
 -- | Insert a power node into the computational graph. Power nodes take a single
 -- input and raise it to the power of a constant exponent
-pow :: Monad m => Label -> Double -> Node -> AutoGradT m Node
-pow label e a = do
-  nid <- insertNode (Payload (PowOp e) label 0.0 0.0)
+pow :: Monad m => Double -> Node -> AutoGradT m Node
+pow e a = do
+  nid <- insertZeroNode (PowOp e)
   insertEdge a nid
   pure nid
 
 -- | Insert a ReLU node into the computational graph
-relu :: Monad m => Label -> Node -> AutoGradT m Node
-relu label a = do
-  nid <- insertNode (Payload ReLUOp label 0.0 0.0)
+relu :: Monad m => Node -> AutoGradT m Node
+relu a = do
+  nid <- insertZeroNode ReLUOp
   insertEdge a nid
   pure nid
 
 -- | Insert a tanh node into the computational graph
-tanh :: Monad m => Label -> Node -> AutoGradT m Node
-tanh label a = do
-  nid <- insertNode (Payload TanhOp label 0.0 0.0)
+tanh :: Monad m => Node -> AutoGradT m Node
+tanh a = do
+  nid <- insertZeroNode TanhOp
   insertEdge a nid
   pure nid
 
@@ -262,26 +277,26 @@ tanh label a = do
 -----------------------
 
 -- | Insert a negation: mul (value -1))
-neg :: Monad m => Label -> Node -> AutoGradT m Node
-neg label a = do
-  minusOne <- value "" (-1.0)
-  mul label a minusOne
+neg :: Monad m => Node -> AutoGradT m Node
+neg a = do
+  minusOne <- value (-1.0)
+  mul a minusOne
 
 -- | Insert a subtraction: add a (neg b)
-sub :: Monad m => Label -> Node -> Node -> AutoGradT m Node
-sub label a b = do
-  negB <- neg "" b
-  add label a negB
+sub :: Monad m => Node -> Node -> AutoGradT m Node
+sub a b = do
+  negB <- neg b
+  add a negB
 
 -- | Insert a reciprocal: pow (-1)
-recip :: Monad m => Label -> Node -> AutoGradT m Node
-recip label = pow label (-1.0)
+recip :: Monad m => Node -> AutoGradT m Node
+recip = pow (-1.0)
 
 -- | Insert a division: mul a (recip b)
-div :: Monad m => Label -> Node -> Node -> AutoGradT m Node
-div label a b = do
-  recipB <- recip "" b
-  mul label a recipB
+div :: Monad m => Node -> Node -> AutoGradT m Node
+div a b = do
+  recipB <- recip b
+  mul a recipB
 
 -------------
 -- Getting --
@@ -296,7 +311,7 @@ getNodeOp :: Monad m => Node -> AutoGradT m NodeOp
 getNodeOp = fmap nodeType . getNodePayload
 
 -- | Get a node's label
-getNodeLabel :: Monad m => Node -> AutoGradT m Label
+getNodeLabel :: Monad m => Node -> AutoGradT m (Maybe Label)
 getNodeLabel = fmap nodeLabel . getNodePayload
 
 -- | Get a node's value
@@ -327,7 +342,7 @@ setNodePayload nid payload = modify (G.setNode nid payload)
 setNodeLabel :: Monad m => Node -> Label -> AutoGradT m ()
 setNodeLabel nid label = do
   payload <- getNodePayload nid
-  setNodePayload nid (payload { nodeLabel = label })
+  setNodePayload nid (payload { nodeLabel = Just label })
 
 -- | Set a node's value
 setNodeVal :: Monad m => Node -> Double -> AutoGradT m ()

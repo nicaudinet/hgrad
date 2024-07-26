@@ -64,19 +64,19 @@ mseLoss
 mseLoss xs ys networkParams = do
   -- For each sample, make relevant input nodes and call the network on them
   yPreds <- forM xs $ \x -> do
-    inputs <- mapM (E.value "") x
+    inputs <- mapM E.value x
     network <- N.networkCall inputs networkParams
     pure (N.networkOutputs network)
   -- Make an input node for each label
   yTrues <- forM ys $ \y ->
-    mapM (E.value "") y
+    mapM E.value y
   -- Add nodes to compute the loss
   a <- forM (zip yTrues yPreds) $ \(yTrue, yPred) -> do
     subs <- forM (zip yTrue yPred) $ \(yt, yp) -> do
-      E.sub "" yt yp
-    E.sum "" subs
-  b <- mapM (\x -> E.mul "" x x) a
-  lossOutput <- E.sum "" b
+      E.sub yt yp
+    E.sum subs
+  b <- mapM (\x -> E.mul x x) a
+  lossOutput <- E.sum b
   pure $
     Loss
       { lossOut = lossOutput

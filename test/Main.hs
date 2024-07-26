@@ -4,6 +4,7 @@ import Control.Monad.Random (getStdGen)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.State
 import Data.List (intercalate)
+import Data.Maybe (fromMaybe)
 import Test.Tasty
 import Test.Tasty.HUnit
 import qualified Test.Tasty.QuickCheck as QC
@@ -34,13 +35,13 @@ runAutoGradTest m = getStdGen >>= E.evalAutoGradT m
 
 assertVal :: G.NodeId -> Double -> AutoGradTest
 assertVal nid a = do
-  bLabel <- E.getNodeLabel nid
+  bLabel <- fromMaybe "_" <$> E.getNodeLabel nid
   bVal <- E.getNodeVal nid
   liftIO $ assertEqual ("value of " <> bLabel) a bVal
 
 assertValApprox :: G.NodeId -> Double -> AutoGradTest
 assertValApprox nid a = do
-  bLabel <- E.getNodeLabel nid
+  bLabel <- fromMaybe "_" <$> E.getNodeLabel nid
   bVal <- E.getNodeVal nid
   let cond = abs (bVal - a) < 1e-6
   let failMsg = intercalate " "
@@ -52,13 +53,13 @@ assertValApprox nid a = do
 
 assertGrad :: G.NodeId -> Double -> AutoGradTest
 assertGrad nid a = do
-  bLabel <- E.getNodeLabel nid
+  bLabel <- fromMaybe "_" <$> E.getNodeLabel nid
   bGrad <- E.getNodeGrad nid
   liftIO $ assertEqual ("grad of " <> bLabel) a bGrad
 
 assertGradApprox :: G.NodeId -> Double -> AutoGradTest
 assertGradApprox nid a = do
-  bLabel <- E.getNodeLabel nid
+  bLabel <- fromMaybe "_" <$> E.getNodeLabel nid
   bGrad <- E.getNodeGrad nid
   let cond = abs (bGrad - a) < 1e-6
   let failMsg = intercalate " "
@@ -152,19 +153,19 @@ testsBackprop = testGroup "Backprop Unit Tests"
   ]
   where
     testAddNodeTwice = runAutoGradTest $ do
-      a <- E.value "a" 3.0
-      b <- E.add "b" a a
+      a <- E.withLabel "a" $ E.value 3.0
+      b <- E.withLabel "b" $ E.add a a
       E.forward
       E.backprop b
       assertVal b 6.0
       assertGrad a 2.0
 
     test2 = runAutoGradTest $ do
-      a <- E.value "a" (-2.0)
-      b <- E.value "b" 3.0
-      d <- E.mul "d" a b
-      e <- E.add "e" a b
-      f <- E.mul "f" d e
+      a <- E.withLabel "a" $ E.value (-2.0)
+      b <- E.withLabel "b" $ E.value 3.0
+      d <- E.withLabel "d" $ E.mul a b
+      e <- E.withLabel "e" $ E.add a b
+      f <- E.withLabel "f" $ E.mul d e
       E.forward
       E.backprop f
       assertVal f (-6.0)
@@ -172,11 +173,11 @@ testsBackprop = testGroup "Backprop Unit Tests"
       assertGrad b (-8.0)
 
     testSum = runAutoGradTest $ do
-      a <- E.value "a" 1.0
-      b <- E.value "b" 2.0
-      c <- E.value "c" 3.0
-      d <- E.value "d" 4.0
-      e <- E.sum "e" [a, b, c, d]
+      a <- E.withLabel "a" $ E.value 1.0
+      b <- E.withLabel "b" $ E.value 2.0
+      c <- E.withLabel "c" $ E.value 3.0
+      d <- E.withLabel "d" $ E.value 4.0
+      e <- E.withLabel "e" $ E.sum [a, b, c, d]
       E.forward
       E.backprop e
       assertVal e 10.0
@@ -186,11 +187,11 @@ testsBackprop = testGroup "Backprop Unit Tests"
       assertGrad d 1.0
 
     testProd = runAutoGradTest $ do
-      a <- E.value "a" 1.0
-      b <- E.value "b" 2.0
-      c <- E.value "c" 3.0
-      d <- E.value "d" 4.0
-      e <- E.prod "e" [a, b, c, d]
+      a <- E.withLabel "a" $ E.value 1.0
+      b <- E.withLabel "b" $ E.value 2.0
+      c <- E.withLabel "c" $ E.value 3.0
+      d <- E.withLabel "d" $ E.value 4.0
+      e <- E.withLabel "e" $ E.prod [a, b, c, d]
       E.forward
       E.backprop e
       assertVal e 24.0
@@ -203,17 +204,21 @@ testsBackprop = testGroup "Backprop Unit Tests"
     -- The magic numbers here correspond to what PyTorch produced. They can be
     -- reproduced by running test_py/test_sanity_check.py
     testSanityCheck = runAutoGradTest $ do
-      x <- E.value "x" (-4.0)
-      z1 <- E.scale "" 2 x
-      z2 <- E.shift "" 2 x
-      z <- E.add "z" z1 z2
-      q1 <- E.relu "" z
-      q2 <- E.mul "" z x
-      q <- E.add "q" q1 q2
-      h1 <- E.mul "" z z
-      h <- E.relu "h" h1
-      y1 <- E.mul "" q x
-      y <- E.sum "y" [h, q, y1]
+      x  <- E.withLabel "x" $ E.value (-4.0)
+      z  <- E.withLabel "z" $ do
+        z1 <- E.scale 2 x
+        z2 <- E.shift 2 x
+        E.add z1 z2
+      q  <- E.withLabel "q" $ do
+        q1 <- E.relu z
+        q2 <- E.mul z x
+        E.add q1 q2
+      h  <- E.withLabel "h" $ do
+        h1 <- E.mul z z
+        E.relu h1
+      y  <- E.withLabel "y" $ do
+        y1 <- E.mul q x
+        E.sum [h, q, y1]
       E.forward
       E.backprop y
       assertVal z (-10.0)
@@ -229,31 +234,35 @@ testsBackprop = testGroup "Backprop Unit Tests"
     -- The magic numbers here correspond to what PyTorch produced. They can be
     -- reproduced by running test_py/test_more_ops.py
     testMoreOps = runAutoGradTest $ do
-      a <- E.value "" (-4.0)
-      b <- E.value "" 2.0
-      c <- E.add "" a b
-      d1 <- E.mul "" a b
-      d2 <- E.pow "" 3 b
-      d <- E.add "" d1 d2
-      c <- E.add "" c c
-      c <- E.shift "" 1 c
-      c <- E.add "" c c
-      c <- E.shift "" 1 c
-      c <- E.sub "" c a
-      d1 <- E.scale "" 2 d
-      d2 <- E.add "" b a
-      d2 <- E.relu "" d2
-      d <- E.sum "" [d, d1, d2]
-      d1 <- E.scale "" 3 d
-      d2 <- E.sub "" b a
-      d2 <- E.relu "" d2
-      d <- E.sum "" [d, d1, d2]
-      e <- E.sub "" c d
-      f <- E.pow "" 2 e
-      g <- E.scale "" (1 / 2.0) f
-      g1 <- E.recip "" f
-      g1 <- E.scale "" 10 g1
-      g <- E.add "" g g1
+      a <- E.withLabel "a" $ E.value (-4.0)
+      b <- E.withLabel "b" $ E.value 2.0
+      c <- E.add a b
+      d <- do
+        d1 <- E.mul a b
+        d2 <- E.pow 3 b
+        E.add d1 d2
+      c <- E.add c c
+      c <- E.shift 1 c
+      c <- E.add c c
+      c <- E.shift 1 c
+      c <- E.sub c a
+      d <- do
+        d1 <- E.scale 2 d
+        d2 <- E.add b a
+        d2 <- E.relu d2
+        E.sum [d, d1, d2]
+      d <- do
+        d1 <- E.scale 3 d
+        d2 <- E.sub b a
+        d2 <- E.relu d2
+        E.sum [d, d1, d2]
+      e <- E.sub c d
+      f <- E.pow 2 e
+      g <- E.scale (1 / 2.0) f
+      g <- do
+        g1 <- E.recip f
+        g1 <- E.scale 10 g1
+        E.add g g1
       E.forward
       E.backprop g
       assertValApprox g 24.70408163265306
@@ -269,8 +278,8 @@ testsNeuron = testGroup "Neuron unit Tests"
   [ testCase "simple neuron with two inputs" simpleNeuron ]
   where
     simpleNeuron = runAutoGradTest $ do
-      i1 <- E.value "i1" 1.0
-      i2 <- E.value "i2" 2.0
+      i1 <- E.withLabel "i1" $ E.value 1.0
+      i2 <- E.withLabel "i2" $ E.value 2.0
       params <- N.neuronInit 2
       neuron <- N.neuronOutput <$> N.neuronCall [i1, i2] params
       E.setNodeVals (zip (N.getNeuronParams params) (repeat 1))

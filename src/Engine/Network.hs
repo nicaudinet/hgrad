@@ -118,9 +118,9 @@ networkInit inputSize layerSizes =
 -- | Create a neuron from it's inputs and parameters
 neuronCall :: Monad m => [E.Node] -> NeuronParams -> E.AutoGradT m Neuron
 neuronCall inputs neuron = do
-  wx <- zipWithM (E.mul "") (weights neuron) inputs
-  activation <- E.sum "" (bias neuron : wx)
-  output <- E.tanh "" activation
+  wx <- zipWithM E.mul (weights neuron) inputs
+  activation <- E.sum (bias neuron : wx)
+  output <- E.tanh activation
   pure $
     Neuron
       { neuronInputs = inputs
