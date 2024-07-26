@@ -17,12 +17,15 @@ module Graph
   , setNodes
   , terminalNodes
   , parentNodes
+  , topoSort
 
   -- * Edge operations
   , insertEdge
 
   ) where
 
+import Control.Monad.Trans.State
+import qualified Data.Set as S
 import qualified Data.Map as M
 
 -- | The unique identifier attached to each node in the graph
@@ -99,6 +102,22 @@ terminalNodes Graph{..} =
 -- | Return a list of parent nodes (nodes with an edge to the given node)
 parentNodes :: NodeId -> Graph a -> [NodeId]
 parentNodes nid Graph{..} = map fst (filter ((== nid) . snd) edges)
+
+-- | Return a topologically sorted list of the nodes in the graph starting from
+-- a particular node.
+-- FIXME: This might break if the graph is not a DAG
+topoSort :: Graph a -> NodeId -> [NodeId]
+topoSort graph = snd . flip execState (S.empty, []). go
+  where
+    go :: NodeId -> State (S.Set NodeId, [NodeId]) ()
+    go node = do
+      (visited, _) <- get
+      if S.member node visited
+      then pure ()
+      else do
+        modify (\(v,s) -> (S.insert node v, s))
+        mapM_ go (parentNodes node graph)
+        modify (\(v,s) -> (v, node : s))
 
 ---------------------
 -- Edge operations --

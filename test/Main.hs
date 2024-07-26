@@ -4,6 +4,7 @@ module Main (main) where
 
 import Control.Monad.Random (getStdGen)
 import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Trans.State
 import Test.Tasty
 import Test.Tasty.HUnit
 import qualified Test.Tasty.QuickCheck as QC
@@ -12,6 +13,20 @@ import qualified Engine as E
 import qualified Engine.Network as N
 import qualified Engine.Network.Train as N
 import qualified Graph as G
+
+type GraphState a = StateT (G.Graph ()) IO a
+
+runGraphState :: GraphState () -> IO ()
+runGraphState = flip evalStateT G.empty
+
+insertNode :: GraphState G.NodeId
+insertNode = do
+  (nid, graph) <- G.insertNode () <$> get
+  put graph
+  pure nid
+
+insertEdge :: G.NodeId -> G.NodeId -> GraphState ()
+insertEdge n1 n2 = modify (G.insertEdge n1 n2)
 
 type AutoGradTest = E.AutoGradT IO ()
 
@@ -34,14 +49,19 @@ main :: IO ()
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Tests" [ propsGraph, testsBackprop, testsNeuron ]
+tests = testGroup "Tests"
+  [ propsGraph
+  , testsGraph
+  , testsBackprop
+  , testsNeuron
+  ]
 
 --------------------------
 -- Graph property tests --
 --------------------------
 
 propsGraph :: TestTree
-propsGraph = testGroup "Graph Properties" [ propsNode, propsEdge ]
+propsGraph = testGroup "Graph Property Tests" [ propsNode, propsEdge ]
 
 propsNode :: TestTree
 propsNode = testGroup "Node Properties"
@@ -64,16 +84,47 @@ propsEdge = testGroup "Edge Properties"
       let (nid, graph) = G.insertNode node (G.empty :: G.Graph Int)
        in G.insertEdge nid nid graph == graph
 
+testsGraph :: TestTree
+testsGraph = testGroup "Graph Unit Tests"
+  [ testCase "topoSort on simple neuron" testTopo ]
+  where
+    -- sigma * (x1 * w1 + x2 * w2 + b)
+    testTopo = runGraphState $ do
+      x1 <- insertNode -- 0
+      w1 <- insertNode -- 1
+      x1w1 <- insertNode -- 2
+      x2 <- insertNode -- 3
+      w2 <- insertNode -- 4
+      x2w2 <- insertNode -- 5
+      x1w1x2w2 <- insertNode -- 6
+      b <- insertNode -- 7
+      n <- insertNode -- 8
+      act <- insertNode -- 9
+      insertEdge x1 x1w1
+      insertEdge w1 x1w1
+      insertEdge x2 x2w2
+      insertEdge w2 x2w2
+      insertEdge x1w1 x1w1x2w2
+      insertEdge x2w2 x1w1x2w2
+      insertEdge x1w1x2w2 n
+      insertEdge b n
+      insertEdge n act
+      graph <- get
+      let ts = G.topoSort graph act
+      let expected = [act, n, x1w1x2w2, x1w1, x1, w1, x2w2, x2, w2, b]
+      liftIO $ assertEqual "topoSort" expected ts
+
 -------------------------
 -- Backprop unit tests --
 -------------------------
 
 testsBackprop :: TestTree
-testsBackprop = testGroup "Backprop unit Tests"
+testsBackprop = testGroup "Backprop Unit Tests"
   [ testCase "b = a + a" testAddNodeTwice
   , testCase "f = (a + b) * (a * b)" test2
   , testCase "sum: e = a + b + c + d" testSum
   , testCase "prod: e = a * b * c * d" testProd
+  , testCase "micrograd: test_sanity_check" testSanityCheck
   ]
   where
     testAddNodeTwice = runAutoGradTest $ do
@@ -123,6 +174,30 @@ testsBackprop = testGroup "Backprop unit Tests"
       assertGrad b 12.0
       assertGrad c  8.0
       assertGrad d  6.0
+
+    -- From https://github.com/karpathy/micrograd/blob/master/test/test_engine.py
+    testSanityCheck = runAutoGradTest $ do
+      x <- E.value "x" (-4.0)
+      z1 <- E.scale "" 2 x
+      z2 <- E.shift "" 2 x
+      z <- E.add "z" z1 z2
+      q1 <- E.relu "" z
+      q2 <- E.mul "" z x
+      q <- E.add "q" q1 q2
+      h1 <- E.mul "" z z
+      h <- E.relu "h" h1
+      y1 <- E.mul "" q x
+      y <- E.sum "y" [h, q, y1]
+      E.forward
+      E.backprop y
+      assertVal z (-10.0)
+      assertVal q 40.0
+      assertVal h 100.0
+      assertVal y (-20.0)
+      assertGrad h 1.0
+      assertGrad q (-3.0)
+      assertGrad z (-8.0)
+      assertGrad x 46.0
 
 -----------------------
 -- Neuron unit tests --

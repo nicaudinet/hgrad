@@ -401,7 +401,8 @@ backprop :: Monad m => Node -> AutoGradT m ()
 backprop node = do
   zeroGrad
   setNodeGrad node 1.0
-  backpropNode node
+  graph <- get
+  mapM_ backpropNode (G.topoSort graph node)
   where
     -- | Perform a backpropagation pass on a single node
     backpropNode :: Monad m => Node -> AutoGradT m ()
@@ -414,13 +415,11 @@ backprop node = do
           forM_ parents $ \pid -> do
             pgrad <- getNodeGrad pid
             setNodeGrad pid (pgrad + grad)
-            backpropNode pid
         ShiftOp _ -> do
           getParentNodes nid >>= \case
             [pid] -> do
               pgrad <- getNodeGrad pid
               setNodeGrad pid (pgrad + grad)
-              backpropNode pid
             x -> error $ "ShiftOp node has " <> show (length x) <> " parents"
         MulOp -> do
           parents <- getParentNodes nid
@@ -429,21 +428,18 @@ backprop node = do
           forM_ (zip parents rests) $ \(pid, rest) -> do
             pgrad <- getNodeGrad pid
             setNodeGrad pid (pgrad + grad * product rest)
-            backpropNode pid
         ScaleOp c -> do
           getParentNodes nid >>= \case
             [pid] -> do
               pgrad <- getNodeGrad pid
               setNodeGrad pid (pgrad + grad * c)
-              backpropNode pid
             x -> error $ "ScaleOp node has " <> show (length x) <> " parents"
         ReLUOp -> do
           getParentNodes nid >>= \case
             [pid] -> do
               pval <- getNodeVal pid
               pgrad <- getNodeGrad pid
-              setNodeGrad pid (pgrad + grad * (if pval > 0 then 1 else 0))
-              backpropNode pid
+              when (pval > 0) $ setNodeGrad pid (pgrad + grad)
             x -> error $ "ReLU node has " <> show (length x) <> " parents"
         TanhOp -> do
           getParentNodes nid >>= \case
@@ -451,5 +447,4 @@ backprop node = do
               pval <- getNodeVal pid
               pgrad <- getNodeGrad pid
               setNodeGrad pid (pgrad + grad * (1 - P.tanh pval ** 2))
-              backpropNode pid
             x -> error $ "Tanh node has " <> show (length x) <> " parents"
