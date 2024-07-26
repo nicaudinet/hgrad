@@ -4,3 +4,5 @@ dist-newstyle
 *.dot
 micrograd
 test_py/.venv
+bench.html
+cabal.project.local

@@ -1,5 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE DeriveGeneric #-}
 
 -- | A module for constructing and executing actions over a computational graph
 
@@ -84,6 +85,7 @@ import Prelude hiding (sum, tanh, recip, div)
 
 import Control.Monad.Random
 import Control.Monad.Trans.State
+import GHC.Generics (Generic)
 import Data.Functor.Identity
 import qualified Data.Map as M
 
@@ -109,7 +111,7 @@ data NodeOp
   | PowOp Double
   | ReLUOp
   | TanhOp
-  deriving (Eq)
+  deriving (Eq, Generic)
 
 -- | Payload for each node in the computational graph
 data Payload =
@@ -119,7 +121,7 @@ data Payload =
     , nodeVal :: Double
     , nodeGrad :: Double
     }
-  deriving (Eq)
+  deriving (Eq, Generic)
 
 -- | The computational graph
 type CGraph = G.Graph Payload

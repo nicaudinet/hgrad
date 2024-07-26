@@ -23,10 +23,16 @@ module Engine.Network
   , layerCall
   , networkCall
 
+  -- * Re-exports from Engine
+  , evalAutoGradT
+  , evalAutoGrad
+
   ) where
 
 import Control.Monad (replicateM, zipWithM, foldM)
 import qualified Engine as E
+
+import Engine (evalAutoGradT, evalAutoGrad) -- imported for re-export
 
 -----------
 -- Types --

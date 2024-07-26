@@ -1,5 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE DeriveGeneric #-}
 
 -- | A simple graph implementation for use as a computational graph
 
@@ -27,12 +28,13 @@ module Graph
   ) where
 
 import Control.Monad.Trans.State
+import GHC.Generics (Generic)
 import qualified Data.Set as S
 import qualified Data.Map as M
 
 -- | The unique identifier attached to each node in the graph
 newtype NodeId = NodeId { nodeIdToInt :: Int }
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Generic)
 
 -- | An edge in the graph (from, to)
 type Edge = (NodeId, NodeId)
@@ -44,7 +46,7 @@ data Graph a =
     { nodes :: M.Map NodeId a
     , edges :: [Edge]
     }
-  deriving Eq
+  deriving (Eq, Generic)
 
 -------------------
 -- Constructors -- 
